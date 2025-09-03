@@ -1,0 +1,552 @@
+
+package simulation; // // پکیج شبیه‌سازی
+
+import java.util.ArrayList; // // لیست آپدیت‌شونده‌ها
+import java.util.List; // // اینترفیس لیست
+import javax.swing.Timer; // // تایمر سوینگ
+import java.awt.event.ActionListener; // // لیسنر رویداد تایمر
+import java.awt.event.ActionEvent; // // رویداد اکشن
+
+public class SimulationClock { // // ساعت شبیه‌سازی
+    private int tickInterval; // // فاصله تیک (میلی‌ثانیه)
+    private final List<Updatable> updatables; // // لیست آبجکت‌های قابل آپدیت
+    private Timer timer; // // تایمر داخلی
+
+    public SimulationClock(int ms) { // // سازنده
+        this.tickInterval = ms; // // ذخیره تیک اولیه
+        this.updatables = new ArrayList<Updatable>(); // // ساخت لیست
+        this.timer = new Timer(tickInterval, new ActionListener() { // // ساخت تایمر با لیسنر
+            @Override public void actionPerformed(ActionEvent e) { // // روی هر تیک
+                for (int i = 0; i < updatables.size(); i++) { // // حلقه روی آپدیت‌شونده‌ها
+                    updatables.get(i).update(); // // آپدیت هر آبجکت
+                }
+            }
+        });
+    }
+
+    public void register(Updatable u) { // // اضافه‌کردن آبجکت به ساعت
+        if (u != null && !updatables.contains(u)) { // // جلوگیری از تکرار
+            updatables.add(u); // // افزودن
+        }
+    }
+
+    public void unregister(Updatable u) { // // حذف از ساعت
+        updatables.remove(u); // // حذف
+    }
+
+    public void start() { // // شروع ساعت
+        if (!timer.isRunning()) timer.start(); // // اگر اجرا نیست، اجرا کن
+    }
+
+    public void stop() { // // توقف ساعت
+        if (timer.isRunning()) timer.stop(); // // اگر اجراست، متوقف کن
+    }
+
+    public void setInterval(int ms) { // // تغییر فاصله تیک
+        if (ms < 5) ms = 5; // // حداقل‌ایمنی
+        this.tickInterval = ms; // // ذخیره
+        this.timer.setDelay(ms); // // اعمال روی تایمر
+    }
+
+    public int getInterval() { // // گرفتن فاصله تیک
+        return tickInterval; // // خروجی
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//package simulation;
+//
+//import java.util.ArrayList;
+//import java.util.List;
+//import java.util.Timer;
+//import java.util.TimerTask;
+//
+///**
+// * ساعت شبیه‌سازی که همه‌ی آبجکت‌های Updatable را در هر تیک صدا می‌زند.
+// */
+//public class SimulationClock {
+//
+//    private final List<Updatable> listeners = new ArrayList<>();
+//    private Timer timer;
+//    private int intervalMs;
+//    private boolean running = false;
+//
+//    public SimulationClock(int intervalMs) {
+//        this.intervalMs = Math.max(1, intervalMs);
+//    }
+//
+//    // ---- کنترل اجرا ----
+//    public synchronized void start() {
+//        if (running) return;
+//        running = true;
+//        timer = new Timer("sim-clock", true);
+//        timer.scheduleAtFixedRate(new TimerTask() {
+//            @Override public void run() { tick(); }
+//        }, 0, intervalMs);
+//    }
+//
+//    public synchronized void stop() {
+//        if (!running) return;
+//        running = false;
+//        if (timer != null) {
+//            timer.cancel();
+//            timer.purge();
+//            timer = null;
+//        }
+//    }
+//
+//    public synchronized void setInterval(int newIntervalMs) {
+//        this.intervalMs = Math.max(1, newIntervalMs);
+//        if (running) { // ریست با نرخ جدید
+//            stop();
+//            start();
+//        }
+//    }
+//
+//    public int getInterval() { return intervalMs; }
+//
+//    // ---- مدیریت شنونده‌ها ----
+//    public synchronized void register(Updatable u) {
+//        if (u != null && !listeners.contains(u)) {
+//            listeners.add(u);
+//        }
+//    }
+//
+//    public synchronized void unregister(Updatable u) {
+//        listeners.remove(u);
+//    }
+//
+//    // ---- تیک ----
+//    private void tick() {
+//        // از کپی استفاده می‌کنیم تا اگر در حین آپدیت لیست تغییر کرد، ConcurrentModification نگیریم
+//        List<Updatable> snapshot;
+//        synchronized (this) { snapshot = new ArrayList<>(listeners); }
+//        for (int i = 0; i < snapshot.size(); i++) {
+//            try { snapshot.get(i).update(); }
+//            catch (Throwable t) { t.printStackTrace(); }
+//        }
+//    }
+//}
+//
+//
+//
+//
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//package simulation;
+//
+//import java.util.List;
+//import java.util.concurrent.CopyOnWriteArrayList;
+//import java.util.concurrent.Executors;
+//import java.util.concurrent.ScheduledExecutorService;
+//import java.util.concurrent.TimeUnit;
+//
+///** ساعت شبیه‌سازی: تِیک ثابت، نخِ اختصاصی، ایمن برای نخ‌ها */
+//public class SimulationClock {
+//
+//    private volatile int intervalMs;                      // فاصله‌ی تیک (ms)
+//    private final List<Updatable> listeners = new CopyOnWriteArrayList<>();
+//    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+//    private volatile boolean running = false;
+//
+//    public SimulationClock(int intervalMs) {
+//        this.intervalMs = Math.max(1, intervalMs);
+//    }
+//
+//    /** شروع تیک‌زنی (Idempotent) */
+//    public synchronized void start() {
+//        if (running) return;
+//        running = true;
+//        executor.scheduleAtFixedRate(this::tick, 0, intervalMs, TimeUnit.MILLISECONDS);
+//    }
+//
+//    /** توقف تیک‌زنی (نخ را نمی‌بندد تا دوباره start بتواند برنامه‌ریزی کند) */
+//    public synchronized void stop() {
+//        running = false;
+//        // هیچ کاری لازم نیست؛ scheduleAtFixedRate همچنان داره صدا می‌خوره اما tick خودش چک می‌کند.
+//    }
+//
+//    /** تغییر سرعت (فاصله‌ی تیک) به صورت امن در حین اجرا */
+//    public synchronized void setInterval(int newIntervalMs) {
+//        int old = this.intervalMs;
+//        this.intervalMs = Math.max(1, newIntervalMs);
+//        if (!running) return;
+//
+//        // ری‌اسکجول برای حفظ نرمی حرکت
+//        running = false;
+//        // یک «وقفه کوتاه» تا تیک جاری تمام شود
+//        try { Thread.sleep(Math.min(old, 5)); } catch (InterruptedException ignored) {}
+//
+//        running = true;
+//        // ابتدا همه‌ی scheduled taskهای قبلی را purge کنیم (فقط پاکسازی داخلی)
+//        // سپس یک برنامه‌ریزی تازه با بازه‌ی جدید انجام می‌دهیم
+//        executor.scheduleAtFixedRate(this::tick, 0, this.intervalMs, TimeUnit.MILLISECONDS);
+//    }
+//
+//    public int getInterval() { return intervalMs; }
+//
+//    /** ثبت/حذف شنونده‌ها */
+//    public void register(Updatable u) {
+//        if (u != null && !listeners.contains(u)) listeners.add(u);
+//    }
+//
+//    public void unregister(Updatable u) {
+//        if (u != null) listeners.remove(u);
+//    }
+//
+//    /** تیک: فقط وقتی running=true باشد اجرا می‌شود */
+//    private void tick() {
+//        if (!running) return;
+//        for (Updatable u : listeners) {
+//            try { u.update(); } catch (Throwable t) {
+//                // برای جلوگیری از مرگ نخ در اثر استثنا
+//                t.printStackTrace();
+//            }
+//        }
+//    }
+//}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//package simulation; // // پکیج simulation
+//
+//import java.util.ArrayList; // // لیست
+//import java.util.List; // // اینترفیس لیست
+//import java.util.Timer; // // تایمر جاوا
+//import java.util.TimerTask; // // تسک زمان‌بندی
+//
+//import simulation.Updatable; // // اینترفیس آپدیت
+//
+//public class SimulationClock { // // ساعت شبیه‌سازی
+//    private final List<Updatable> listeners; // // لیست آبجکت‌های قابل‌به‌روزرسانی
+//    private Timer timer; // // تایمر داخلی
+//    private int intervalMs; // // فاصله‌ی تیک (میلی‌ثانیه)
+//    private boolean running; // // وضعیت اجرا
+//
+//    public SimulationClock(int intervalMs) { // // سازنده
+//        this.listeners = new ArrayList<Updatable>(); // // ایجاد لیست
+//        this.intervalMs = Math.max(1, intervalMs); // // ست فاصله تیک
+//        this.running = false; // // ابتدا متوقف
+//    }
+//
+//    public synchronized void register(Updatable u) { // // ثبت شنونده
+//        if (u != null && !this.listeners.contains(u)) { // // جلوگیری از تکرار
+//            this.listeners.add(u); // // افزودن
+//        }
+//    }
+//
+//    public synchronized void unregister(Updatable u) { // // حذف شنونده
+//        this.listeners.remove(u); // // حذف
+//    }
+//
+//    public synchronized int getInterval() { return this.intervalMs; } // // گتر فاصله تیک
+//
+//    public synchronized void setInterval(int newIntervalMs) { // // تغییر فاصله تیک
+//        int clamped = newIntervalMs; // // مقدار موقت
+//        if (clamped < SimulationConfig.MIN_INTERVAL) { clamped = SimulationConfig.MIN_INTERVAL; } // // حداقل
+//        if (clamped > SimulationConfig.MAX_INTERVAL) { clamped = SimulationConfig.MAX_INTERVAL; } // // حداکثر
+//        this.intervalMs = clamped; // // ست مقدار
+//        if (this.running) { // // اگر در حال اجرا
+//            restartTimer(); // // ری‌استارت تایمر با فاصله جدید
+//        }
+//    }
+//
+//    public synchronized void start() { // // شروع ساعت
+//        if (this.running) { return; } // // اگر قبلاً روشن است کاری نکن
+//        this.running = true; // // وضعیت اجرا
+//        this.timer = new Timer("SimClock", true); // // تایمر Daemon
+//        scheduleTask(); // // زمان‌بندی تسک
+//    }
+//
+//    public synchronized void stop() { // // توقف ساعت
+//        if (!this.running) { return; } // // اگر از قبل متوقف است کاری نکن
+//        this.running = false; // // وضعیت
+//        if (this.timer != null) { // // اگر تایمر داریم
+//            try { this.timer.cancel(); } catch (Exception ignore) {} // // لغو تایمر
+//            this.timer = null; // // خالی کردن
+//        }
+//    }
+//
+//    private synchronized void restartTimer() { // // ری‌استارت با فاصله جدید
+//        stop(); // // توقف تایمر فعلی
+//        start(); // // شروع مجدد با interval جدید
+//    }
+//
+//    private void scheduleTask() { // // زمان‌بندی تسک دوره‌ای
+//        final SimulationClock self = this; // // ارجاع برای کلاس داخلی
+//        TimerTask task = new TimerTask() { // // کلاس ناشناس (بدون لامبدا)
+//            @Override public void run() { // // اجرای هر تیک
+//                self.tick(); // // فراخوانی تیک
+//            }
+//        };
+//        this.timer.scheduleAtFixedRate(task, 0, this.intervalMs); // // اجرای دوره‌ای
+//    }
+//
+//    private void tick() { // // بدنه‌ی هر تیک
+//        Updatable[] arr; // // آرایه موقت برای Thread-Safe ساده
+//        synchronized (this) { // // قفل برای خواندن لیست
+//            arr = this.listeners.toArray(new Updatable[0]); // // کپی ایمن
+//        }
+//        for (int i = 0; i < arr.length; i++) { // // حلقه روی شنونده‌ها
+//            try { arr[i].update(); } // // به‌روزرسانی هرکدام
+//            catch (Throwable t) { /* // // جلوگیری از توقف تایمر در خطا */ }
+//        }
+//    }
+//}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//package simulation; // // پکیج شبیه‌سازی
+//
+//import java.util.ArrayList; // // لیست آپدیت‌شونده‌ها
+//import java.util.List; // // اینترفیس لیست
+//import javax.swing.Timer; // // تایمر سوینگ
+//import java.awt.event.ActionListener; // // لیسنر رویداد تایمر
+//import java.awt.event.ActionEvent; // // رویداد اکشن
+//
+//public class SimulationClock { // // ساعت شبیه‌سازی
+//    private int tickInterval; // // فاصله تیک (میلی‌ثانیه)
+//    private final List<Updatable> updatables; // // لیست آبجکت‌های قابل آپدیت
+//    private Timer timer; // // تایمر داخلی
+//
+//    public SimulationClock(int ms) { // // سازنده
+//        this.tickInterval = ms; // // ذخیره تیک اولیه
+//        this.updatables = new ArrayList<Updatable>(); // // ساخت لیست
+//        this.timer = new Timer(tickInterval, new ActionListener() { // // ساخت تایمر با لیسنر
+//            @Override public void actionPerformed(ActionEvent e) { // // روی هر تیک
+//                for (int i = 0; i < updatables.size(); i++) { // // حلقه روی آپدیت‌شونده‌ها
+//                    updatables.get(i).update(); // // آپدیت هر آبجکت
+//                }
+//            }
+//        });
+//    }
+//
+//    public void register(Updatable u) { // // اضافه‌کردن آبجکت به ساعت
+//        if (u != null && !updatables.contains(u)) { // // جلوگیری از تکرار
+//            updatables.add(u); // // افزودن
+//        }
+//    }
+//
+//    public void unregister(Updatable u) { // // حذف از ساعت
+//        updatables.remove(u); // // حذف
+//    }
+//
+//    public void start() { // // شروع ساعت
+//        if (!timer.isRunning()) timer.start(); // // اگر اجرا نیست، اجرا کن
+//    }
+//
+//    public void stop() { // // توقف ساعت
+//        if (timer.isRunning()) timer.stop(); // // اگر اجراست، متوقف کن
+//    }
+//
+//    public void setInterval(int ms) { // // تغییر فاصله تیک
+//        if (ms < 5) ms = 5; // // حداقل‌ایمنی
+//        this.tickInterval = ms; // // ذخیره
+//        this.timer.setDelay(ms); // // اعمال روی تایمر
+//    }
+//
+//    public int getInterval() { // // گرفتن فاصله تیک
+//        return tickInterval; // // خروجی
+//    }
+//}
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//package simulation;
+//
+//import java.util.ArrayList;
+//import java.util.List;
+//import java.util.Timer;
+//import java.util.TimerTask;
+//
+//public class  SimulationClock {
+//    private int tickInterval; // به میلی‌ثانیه
+//    private List<Updatable> updatables;
+//    private Timer timer;
+//    private boolean running;
+//
+//    public SimulationClock(int tickInterval) {
+//        this.tickInterval = tickInterval;
+//        this.updatables = new ArrayList<>();
+//        this.running = false;
+//    }
+//
+//    public void register(Updatable u) {
+//        updatables.add(u);
+//    }
+//
+//    public void start() {
+//        if (running) return;
+//
+//        running = true;
+//        timer = new Timer();
+//        timer.scheduleAtFixedRate(new TimerTask() {
+//            @Override
+//            public void run() {
+//                for (Updatable u : updatables) {
+//                    u.update();
+//                }
+//            }
+//        }, 0, tickInterval);
+//    }
+//
+//    public void stop() {
+//        if (timer != null) {
+//            timer.cancel();
+//        }
+//        running = false;
+//    }
+//
+//    public boolean isRunning() {
+//        return running;
+//    }
+//
+//    public int getTickInterval() { // // برگرداندن فاصله زمانی هر تیک (ms)
+//        return tickInterval;
+//    }
+//
+//
+//    public void setTickInterval(int interval) {
+//        this.tickInterval = interval;
+//        if (running) {
+//            stop();
+//            start();
+//        }
+//    }
+//}
