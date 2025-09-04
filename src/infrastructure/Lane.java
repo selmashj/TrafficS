@@ -1,108 +1,205 @@
+
 package infrastructure; // // پکیج زیرساخت
 
-import core.Direction; // // جهت
-import core.Identifiable; // // اینترفیس شناسه
-import core.Point; // // نقطه
-import ui.UIConstants; // // ثوابت UI
-import java.awt.geom.Point2D; // // نقطه اعشاری
+import core.Direction;         // // جهت حرکت لِین
+import core.Identifiable;      // // اینترفیس شناسه یکتا
+import core.Point;             // // نقطهٔ صحیح (X,Y) پروژه
+import core.Vehicle;           // // برای ثبت خودروها و پیدا کردن لیدر
+import ui.UIConstants;         // // ثوابت UI مثل عرض لِین
 
-public class Lane implements Identifiable { // // لاین یک‌طرفه
-    private final String id; // // شناسه
-    private final Direction direction; // // جهت
-    private final Road parentRoad; // // جادهٔ والد
+import java.awt.geom.Point2D;  // // نقطهٔ اعشاری برای محاسبات هندسی
+import java.util.ArrayList;    // // لیست پویا
+import java.util.Collections;  // // ابزار لیست‌های امن
+import java.util.List;         // // اینترفیس لیست
 
-    private Lane leftAdjacentLane; // // همسایه چپ
-    private Lane rightAdjacentLane; // // همسایه راست
-    private int offsetIndex = 0; // // ایندکس در گروه همان‌جهت
+public class Lane implements Identifiable { // // نمایندهٔ یک لِین یک‌طرفه روی یک جاده
+    private final String id;            // // شناسه یکتا
+    private final Direction direction;  // // جهت حرکت در این لِین
+    private final Road parentRoad;      // // جادهٔ والد که این لِین روی آن قرار دارد
 
-    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
-        this.id = id; // // ست
-        this.direction = direction; // // ست
-        this.parentRoad = parentRoad; // // ست
+    private Lane leftAdjacentLane;      // // لِین همسایهٔ چپ (اگر وجود داشته باشد)
+    private Lane rightAdjacentLane;     // // لِین همسایهٔ راست (اگر وجود داشته باشد)
+    private int offsetIndex = 0;        // // اندیس این لِین داخل گروه همان جهت (۰،۱،۲…)
+
+    // --- افزوده: نگهداری خودروهای داخل این لِین (thread-safe) ---
+    private final List<Vehicle> occupants = Collections.synchronizedList(new ArrayList<Vehicle>()); // // خودروهای حاضر در لِین
+
+    public Lane(String id, Direction direction, Road parentRoad) { // // سازندهٔ لِین
+        this.id = id;                  // // مقداردهی شناسه
+        this.direction = direction;    // // مقداردهی جهت
+        this.parentRoad = parentRoad;  // // مقداردهی جادهٔ والد
     }
 
-    @Override public String getId(){ return id; } // // گتر ID
-    public Direction getDirection(){ return direction; } // // گتر جهت
-    public Road getParentRoad(){ return parentRoad; } // // گتر جاده
-    public Lane getLeftAdjacentLane(){ return leftAdjacentLane; } // // گتر چپ
-    public Lane getRightAdjacentLane(){ return rightAdjacentLane; } // // گتر راست
-    public void setLeftAdjacentLane(Lane l){ this.leftAdjacentLane = l; } // // ست چپ
-    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane = l; } // // ست راست
-    public void setOffsetIndex(int index){ this.offsetIndex = index; } // // ست ایندکس
-
-    public double getLength(){ // // طول تقریبی مسیر مرکزی
-        final int SAMPLES = 24; // // تعداد نمونه
-        double length = 0.0; // // مجموع
-        Point2D prev = parentRoad.curvePoint(0.0); // // نقطه اول
-        for(int i=1;i<=SAMPLES;i++){ // // حلقه
-            double t = (double)i / (double)SAMPLES; // // t
-            Point2D p = parentRoad.curvePoint(t); // // نقطه
-            length += prev.distance(p); // // جمع طول
-            prev = p; // // به‌روزرسانی
-        }
-        return length; // // خروجی
+    @Override
+    public String getId() {            // // پیاده‌سازی گتر شناسه
+        return id;                     // // برگرداندن شناسه
     }
 
-    private double sToT(double s){ // // نگاشت فاصله به پارامتر t
-        final int SAMPLES = 60; // // نمونه زیاد
-        double[] cum = new double[SAMPLES+1]; // // جدول تجمعی
-        cum[0] = 0; // // اول صفر
-        Point2D prev = parentRoad.curvePoint(0.0); // // نقطه 0
-        for(int i=1;i<=SAMPLES;i++){ // // حلقه
-            double t = (double)i / (double)SAMPLES; // // t
-            Point2D p = parentRoad.curvePoint(t); // // نقطه
-            cum[i] = cum[i-1] + prev.distance(p); // // تجمعی
-            prev = p; // // آپدیت
-        }
-        double total = cum[SAMPLES]; // // کل طول
-        if (s <= 0) return 0.0; // // کلیپ
-        if (s >= total) return 1.0; // // کلیپ
-        int lo = 0, hi = SAMPLES; // // مرزها
-        while(hi - lo > 1){ // // باینری سرچ
-            int mid = (lo + hi) >>> 1; // // وسط
-            if (cum[mid] < s) lo = mid; else hi = mid; // // انتخاب نیمه
-        }
-        double seg = cum[hi] - cum[lo]; // // طول سگمنت
-        double ratio = (seg<=1e-6)?0.0: (s - cum[lo]) / seg; // // نسبت
-        return ((double)lo + ratio) / (double)SAMPLES; // // t
+    public Direction getDirection() {  // // گتر جهت
+        return direction;              // // برگرداندن جهت
     }
 
-    public Point getPositionAt(double positionInLane){ // // مرکز خودرو روی لاین
-        double L = getLength(); // // طول
-        if (L < 1e-6) { // // محافظت
-            Point P = parentRoad.getStartIntersection().getPosition(); // // نقطه A
-            return new Point(P.getX(), P.getY()); // // بازگشت
-        }
-        int sideSign = (direction==Direction.EAST || direction==Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
-        double s = positionInLane; // // فاصله روی مسیر
-        if (sideSign < 0) s = L - s; // // معکوس برای جهت مخالف
-        double t = sToT(s); // // نگاشت s→t
-        Point2D center = parentRoad.curvePoint(t); // // نقطه مرکزی
-        Point2D tan = parentRoad.curveTangent(t); // // بردار مماس
-        double lenT = Math.hypot(tan.getX(), tan.getY()); // // طول مماس
-        if (lenT < 1e-6) lenT = 1; // // جلوگیری از صفر
-        double nx = -tan.getY() / lenT; // // نرمال x
-        double ny =  tan.getX() / lenT; // // نرمال y
-
-        int lanesF = parentRoad.getForwardLanes().size(); // // تعداد رفت
-        int lanesB = parentRoad.getBackwardLanes().size(); // // تعداد برگشت
-        int perSide = Math.max(lanesF, lanesB); // // بیشینه هر سمت
-        double groupWidth = perSide * UIConstants.LANE_WIDTH
-                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنای گروه
-        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupWidth * 0.5; // // فاصله مرکز گروه
-        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // آفست درون گروه
-
-        double lateral = sideSign * sideCenter + (-offsetIndex * perLaneOffset * sideSign); // // آفست کل
-        int x = (int)Math.round(center.getX() + nx * lateral); // // X
-        int y = (int)Math.round(center.getY() + ny * lateral); // // Y
-        return new Point(x, y); // // خروجی
+    public Road getParentRoad() {      // // گتر جادهٔ والد
+        return parentRoad;             // // برگرداندن جاده
     }
 
-    public double getAngleRadians(){ // // زاویهٔ کلی لاین
-        Point2D tan = parentRoad.curveTangent(0.5); // // مماس میان مسیر
-        double angle = Math.atan2(tan.getY(), tan.getX()); // // زاویه A→B
-        if (direction==Direction.WEST || direction==Direction.NORTH) angle += Math.PI; // // ۱۸۰ درجه برای معکوس
-        return angle; // // خروجی
+    public Lane getLeftAdjacentLane() {    // // گتر لِین همسایهٔ چپ (برای OvertakingRules)
+        return leftAdjacentLane;           // // بازگرداندن رفرنس چپ
+    }
+
+    public Lane getRightAdjacentLane() {   // // گتر لِین همسایهٔ راست (برای OvertakingRules)
+        return rightAdjacentLane;          // // بازگرداندن رفرنس راست
+    }
+
+    public void setLeftAdjacentLane(Lane l) {  // // ستر همسایهٔ چپ
+        this.leftAdjacentLane = l;             // // تنظیم مقدار
+    }
+
+    public void setRightAdjacentLane(Lane l) { // // ستر همسایهٔ راست
+        this.rightAdjacentLane = l;            // // تنظیم مقدار
+    }
+
+    public void setOffsetIndex(int index) {    // // تنظیم اندیس افست داخل گروه همان جهت
+        this.offsetIndex = index;              // // ذخیرهٔ اندیس
+    }
+
+    // ===================== مدیریت خودروها در لِین =====================
+
+    public void registerVehicle(Vehicle v) {    // // افزودن خودرو به لِین
+        if (v == null) return;                  // // محافظت از null
+        if (v.getCurrentLane() != this) return; // // فقط اگر واقعاً در همین لِین است
+        if (!occupants.contains(v)) {           // // جلوگیری از تکرار
+            occupants.add(v);                   // // اضافه به لیست
+        }
+    }
+
+    public void unregisterVehicle(Vehicle v) {  // // حذف خودرو از لِین
+        occupants.remove(v);                    // // حذف اگر وجود داشته باشد
+    }
+
+    public List<Vehicle> getVehiclesView() {    // // نمای امن (کپی غیرقابل‌تغییر) از خودروهای لِین
+        synchronized (occupants) {              // // قفل برای سازگاری چندنخی
+            return Collections.unmodifiableList(new ArrayList<Vehicle>(occupants)); // // کپی امن
+        }
+    }
+
+    /**
+     * پیدا کردن نزدیک‌ترین خودروی جلو (Leader) در همین لِین برای «self».
+     * اگر چیزی جلو نباشد، null برمی‌گردد.
+     */
+    public Vehicle findLeaderAhead(Vehicle self) {           // // جستجوی لیدر جلو
+        if (self == null) return null;                       // // محافظت
+        final double sSelf = self.getPositionInLane();       // // مکان طولی خودروی فعلی
+        final boolean forward = (direction == Direction.EAST // // تشخیص جهت مثبت
+                || direction == Direction.SOUTH);            // // برای EAST/SOUTH s بزرگ‌تر یعنی جلو
+
+        Vehicle best = null;                                 // // بهترین کاندید
+        double bestDelta = Double.POSITIVE_INFINITY;         // // فاصله طولی مینیمم
+
+        synchronized (occupants) {                           // // قفل روی لیست
+            for (int i = 0; i < occupants.size(); i++) {     // // پیمایش خودروها
+                Vehicle v = occupants.get(i);                // // یک خودرو
+                if (v == self) continue;                     // // خودِ ماشین را رد کن
+                double s = v.getPositionInLane();            // // موقعیت آن خودرو
+
+                if (forward) {                               // // اگر جهت رو به جلو (A→B)
+                    if (s <= sSelf) continue;                // // فقط ماشین‌هایی که جلوترند
+                    double gap = s - sSelf;                  // // فاصله طولی
+                    if (gap < bestDelta) {                   // // اگر نزدیک‌تر است
+                        bestDelta = gap;                     // // به‌روز رسانی فاصله
+                        best = v;                            // // انتخاب لیدر
+                    }
+                } else {                                     // // جهت معکوس (B→A)
+                    if (s >= sSelf) continue;                // // فقط ماشین‌هایی که جلوتر در معکوس‌اند (s کوچک‌تر)
+                    double gap = sSelf - s;                  // // فاصله طولی
+                    if (gap < bestDelta) {                   // // اگر نزدیک‌تر است
+                        bestDelta = gap;                     // // به‌روزرسانی
+                        best = v;                            // // انتخاب
+                    }
+                }
+            }
+        }
+        return best;                                         // // لیدر (یا null)
+    }
+
+    // ===================== هندسهٔ مسیر/طول/زاویه (بدون تغییر) =====================
+
+    public double getLength() {            // // طول تقریبی مسیر مرکزی لِین (براساس مسیر جاده)
+        final int SAMPLES = 24;            // // تعداد نمونه برای تقریب
+        double length = 0.0;               // // متغیر جمع طول
+        Point2D prev = parentRoad.curvePoint(0.0); // // نقطهٔ آغاز مسیر (t=0)
+        for (int i = 1; i <= SAMPLES; i++) {       // // پیمایش نمونه‌ها
+            double t = (double) i / (double) SAMPLES; // // پارامتر t فعلی
+            Point2D p = parentRoad.curvePoint(t);     // // نقطهٔ متناظر روی مسیر
+            length += prev.distance(p);               // // افزودن فاصله قطعه
+            prev = p;                                 // // بروزرسانی نقطهٔ قبلی
+        }
+        return length;                 // // بازگرداندن طول تقریبی
+    }
+
+    private double sToT(double s) {    // // نگاشت فاصلهٔ واقعی s روی مسیر به پارامتر t ∈ [0..1]
+        final int S = 60;              // // دقت نمونه‌گیری برای جدول تجمعی
+        double[] acc = new double[S + 1]; // // آرایهٔ طول تجمعی
+        acc[0] = 0.0;                  // // مقدار اولیه
+        Point2D prev = parentRoad.curvePoint(0.0); // // نقطهٔ آغاز
+        for (int i = 1; i <= S; i++) {            // // محاسبهٔ تجمعی
+            double t = (double) i / (double) S;   // // t فعلی
+            Point2D p = parentRoad.curvePoint(t); // // نقطهٔ روی مسیر
+            acc[i] = acc[i - 1] + prev.distance(p); // // طول تجمعی تا این نمونه
+            prev = p;                              // // بروزرسانی prev
+        }
+        double total = acc[S];         // // طول کل مسیر
+        if (s <= 0) return 0.0;        // // کلیپ پایین
+        if (s >= total) return 1.0;    // // کلیپ بالا
+        int lo = 0, hi = S;            // // جستجوی دودویی بین نمونه‌ها
+        while (hi - lo > 1) {          // // حلقهٔ جستجو
+            int mid = (lo + hi) >>> 1; // // اندیس میانی
+            if (acc[mid] < s) lo = mid; else hi = mid; // // انتخاب بازه
+        }
+        double seg = acc[hi] - acc[lo];                 // // طول سگمنت یافت‌شده
+        double ratio = (seg <= 1e-6) ? 0.0 : (s - acc[lo]) / seg; // // نسبت درون سگمنت
+        return ((double) lo + ratio) / (double) S;      // // t متناظر با s
+    }
+
+    public Point getPositionAt(double positionInLane) { // // مرکز خودرو روی این لِین در فاصلهٔ داده‌شده
+        double L = getLength();                         // // طول لِین
+        if (L < 1e-6) {                                 // // محافظت از تقسیم بر صفر
+            Point A = parentRoad.getStartIntersection().getPosition(); // // گرفتن نقطهٔ شروع
+            return new Point(A.getX(), A.getY());       // // بازگرداندن همان نقطه
+        }
+
+        int sideSign = (direction == Direction.EAST || direction == Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
+        double s = positionInLane;                      // // فاصلهٔ روی مسیر
+        if (sideSign < 0) s = L - s;                    // // معکوس کردن برای جهت مخالف
+
+        double t = sToT(s);                             // // نگاشت s به t
+        Point2D c = parentRoad.curvePoint(t);           // // نقطهٔ مرکزی مسیر
+        Point2D tan = parentRoad.curveTangent(t);       // // بردار مماس مسیر
+        double lenT = Math.hypot(tan.getX(), tan.getY()); // // طول بردار مماس
+        if (lenT < 1e-6) lenT = 1.0;                    // // جلوگیری از صفر
+        double nx = -tan.getY() / lenT;                 // // مؤلفهٔ X نرمال چپ مسیر
+        double ny =  tan.getX() / lenT;                 // // مؤلفهٔ Y نرمال چپ مسیر
+
+        int lanesF = parentRoad.getForwardLanes().size(); // // تعداد لِین‌های جهت رفت
+        int lanesB = parentRoad.getBackwardLanes().size(); // // تعداد لِین‌های جهت برگشت
+        int perSide = Math.max(lanesF, lanesB);           // // بیشینهٔ لِین برای هر سمت
+        double groupW = perSide * UIConstants.LANE_WIDTH
+                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنای گروه یک سمت
+        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupW * 0.5; // // فاصلهٔ مرکز گروه از مرکز راه
+        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // افست بین لِین‌ها
+
+        double lateral = sideSign * sideCenter + (-offsetIndex * perLaneOffset * sideSign); // // افست جانبی نهایی
+
+        int x = (int) Math.round(c.getX() + nx * lateral); // // مختصات X مرکز خودرو
+        int y = (int) Math.round(c.getY() + ny * lateral); // // مختصات Y مرکز خودرو
+        return new Point(x, y);                             // // بازگرداندن نقطهٔ نهایی
+    }
+
+    public double getAngleRadians() {                     // // زاویهٔ حرکت خودرو روی این لِین (رادیان)
+        Point2D tan = parentRoad.curveTangent(0.5);       // // مماس در میانهٔ مسیر
+        double a = Math.atan2(tan.getY(), tan.getX());    // // زاویهٔ A→B
+        if (direction == Direction.WEST || direction == Direction.NORTH) a += Math.PI; // // تصحیح برای جهت معکوس
+        return a;                                         // // بازگرداندن زاویه
     }
 }
 
@@ -133,129 +230,140 @@ public class Lane implements Identifiable { // // لاین یک‌طرفه
 
 
 
-
 //package infrastructure; // // پکیج زیرساخت
 //
-//import core.Direction;         // // جهت
-//import core.Identifiable;      // // برای ID
-//import core.Point;             // // مختصات صحیح پروژه
-//import ui.UIConstants;         // // ثوابت UI
+//import core.Direction;         // // جهت حرکت لِین
+//import core.Identifiable;      // // اینترفیس شناسه یکتا
+//import core.Point;             // // نقطهٔ صحیح (X,Y) پروژه
+//import ui.UIConstants;         // // ثوابت UI مثل عرض لِین
+//import java.awt.geom.Point2D;  // // نقطهٔ اعشاری برای محاسبات هندسی
 //
-//import java.awt.geom.Point2D;  // // برای محاسبات اعشاری
+//public class Lane implements Identifiable { // // نمایندهٔ یک لِین یک‌طرفه روی یک جاده
+//    private final String id;            // // شناسه یکتا
+//    private final Direction direction;  // // جهت حرکت در این لِین
+//    private final Road parentRoad;      // // جادهٔ والد که این لِین روی آن قرار دارد
 //
-//public class Lane implements Identifiable { // // مسیر یک‌طرفه
-//    private final String id;               // // شناسه
-//    private final Direction direction;     // // جهت حرکت لِین
-//    private final Road parentRoad;         // // جادهٔ والد
+//    private Lane leftAdjacentLane;      // // لِین همسایهٔ چپ (اگر وجود داشته باشد)
+//    private Lane rightAdjacentLane;     // // لِین همسایهٔ راست (اگر وجود داشته باشد)
+//    private int offsetIndex = 0;        // // اندیس این لِین داخل گروه همان جهت (۰،۱،۲…)
 //
-//    private Lane leftAdjacentLane;         // // همسایهٔ چپ
-//    private Lane rightAdjacentLane;        // // همسایهٔ راست
-//    private int offsetIndex = 0;           // // ایندکس درون گروه همان جهت
-//
-//    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
-//        this.id = id; this.direction = direction; this.parentRoad = parentRoad; // // ست‌ها
+//    public Lane(String id, Direction direction, Road parentRoad) { // // سازندهٔ لِین
+//        this.id = id;                  // // مقداردهی شناسه
+//        this.direction = direction;    // // مقداردهی جهت
+//        this.parentRoad = parentRoad;  // // مقداردهی جادهٔ والد
 //    }
 //
-//    @Override public String getId(){ return id; }       // // گتر ID
-//    public Direction getDirection(){ return direction; } // // گتر جهت
-//    public Road getParentRoad(){ return parentRoad; }    // // گتر جاده
-//    public Lane getLeftAdjacentLane(){ return leftAdjacentLane; }   // // چپ
-//    public Lane getRightAdjacentLane(){ return rightAdjacentLane; } // // راست
-//    public void setLeftAdjacentLane(Lane l){ this.leftAdjacentLane = l; } // // ست چپ
-//    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane = l; } // // ست راست
-//    public void setOffsetIndex(int index){ this.offsetIndex = index; } // // ست ایندکس
+//    @Override
+//    public String getId() {            // // پیاده‌سازی گتر شناسه
+//        return id;                     // // برگرداندن شناسه
+//    }
 //
-//    // ====== طول مسیر مرکزی (تقریبی برای منحنی) ======
-//    public double getLength(){ // // طول تقریبی (نمونه‌برداری)
-//        final int SAMPLES = 24;                                   // // تعداد نمونه برای تقریب
-//        double length = 0.0;                                      // // جمع طول
-//        Point2D prev = parentRoad.curvePoint(0.0);                // // نقطهٔ t=0
-//        for(int i=1;i<=SAMPLES;i++){                              // // حلقهٔ نمونه‌ها
-//            double t = (double)i / (double)SAMPLES;               // // t
-//            Point2D p = parentRoad.curvePoint(t);                 // // نقطه
-//            double dx = p.getX() - prev.getX();                   // // Δx
-//            double dy = p.getY() - prev.getY();                   // // Δy
-//            length += Math.hypot(dx, dy);                         // // افزایش طول
-//            prev = p;                                             // // به‌روزرسانی قبلی
+//    public Direction getDirection() {  // // گتر جهت
+//        return direction;              // // برگرداندن جهت
+//    }
+//
+//    public Road getParentRoad() {      // // گتر جادهٔ والد
+//        return parentRoad;             // // برگرداندن جاده
+//    }
+//
+//    public Lane getLeftAdjacentLane() {    // // گتر لِین همسایهٔ چپ (برای OvertakingRules)
+//        return leftAdjacentLane;           // // بازگرداندن رفرنس چپ
+//    }
+//
+//    public Lane getRightAdjacentLane() {   // // گتر لِین همسایهٔ راست (برای OvertakingRules)
+//        return rightAdjacentLane;          // // بازگرداندن رفرنس راست
+//    }
+//
+//    public void setLeftAdjacentLane(Lane l) {  // // ستر همسایهٔ چپ
+//        this.leftAdjacentLane = l;             // // تنظیم مقدار
+//    }
+//
+//    public void setRightAdjacentLane(Lane l) { // // ستر همسایهٔ راست
+//        this.rightAdjacentLane = l;            // // تنظیم مقدار
+//    }
+//
+//    public void setOffsetIndex(int index) {    // // تنظیم اندیس افست داخل گروه همان جهت
+//        this.offsetIndex = index;              // // ذخیرهٔ اندیس
+//    }
+//
+//    public double getLength() {            // // طول تقریبی مسیر مرکزی لِین (براساس مسیر جاده)
+//        final int SAMPLES = 24;            // // تعداد نمونه برای تقریب
+//        double length = 0.0;               // // متغیر جمع طول
+//        Point2D prev = parentRoad.curvePoint(0.0); // // نقطهٔ آغاز مسیر (t=0)
+//        for (int i = 1; i <= SAMPLES; i++) {       // // پیمایش نمونه‌ها
+//            double t = (double) i / (double) SAMPLES; // // پارامتر t فعلی
+//            Point2D p = parentRoad.curvePoint(t);     // // نقطهٔ متناظر روی مسیر
+//            length += prev.distance(p);               // // افزودن فاصله قطعه
+//            prev = p;                                 // // بروزرسانی نقطهٔ قبلی
 //        }
-//        return length;                                            // // خروجی
+//        return length;                 // // بازگرداندن طول تقریبی
 //    }
 //
-//    // نگاشت از «فاصله s روی لِین» به «t روی منحنی» //
-//    private double sToT(double s){ // // تقریب معکوس با جدول تجمعی
-//        final int SAMPLES = 60;                                 // // نمونهٔ زیادتر برای دقت
-//        double[] cum = new double[SAMPLES+1];                   // // آرایهٔ طول تجمعی
-//        cum[0] = 0;                                            // // شروع صفر
-//        Point2D prev = parentRoad.curvePoint(0.0);              // // t=0
-//        for(int i=1;i<=SAMPLES;i++){                            // // پرکردن جدول
-//            double t = (double)i / (double)SAMPLES;             // // t
-//            Point2D p = parentRoad.curvePoint(t);               // // نقطه
-//            cum[i] = cum[i-1] + prev.distance(p);               // // طول تجمعی
-//            prev = p;                                           // // قبلی
+//    private double sToT(double s) {    // // نگاشت فاصلهٔ واقعی s روی مسیر به پارامتر t ∈ [0..1]
+//        final int S = 60;              // // دقت نمونه‌گیری برای جدول تجمعی
+//        double[] acc = new double[S + 1]; // // آرایهٔ طول تجمعی
+//        acc[0] = 0.0;                  // // مقدار اولیه
+//        Point2D prev = parentRoad.curvePoint(0.0); // // نقطهٔ آغاز
+//        for (int i = 1; i <= S; i++) {            // // محاسبهٔ تجمعی
+//            double t = (double) i / (double) S;   // // t فعلی
+//            Point2D p = parentRoad.curvePoint(t); // // نقطهٔ روی مسیر
+//            acc[i] = acc[i - 1] + prev.distance(p); // // طول تجمعی تا این نمونه
+//            prev = p;                              // // بروزرسانی prev
 //        }
-//        double total = cum[SAMPLES];                            // // کل طول
-//        if (s <= 0) return 0.0; if (s >= total) return 1.0;     // // کلیپ
-//        // باینری سرچ ساده //
-//        int lo = 0, hi = SAMPLES;                               // // بازه
-//        while(hi - lo > 1){                                     // // تا رسیدن به خانه نزدیک
-//            int mid = (lo + hi) >>> 1;                          // // وسط
-//            if (cum[mid] < s) lo = mid; else hi = mid;          // // انتخاب نیمه
+//        double total = acc[S];         // // طول کل مسیر
+//        if (s <= 0) return 0.0;        // // کلیپ پایین
+//        if (s >= total) return 1.0;    // // کلیپ بالا
+//        int lo = 0, hi = S;            // // جستجوی دودویی بین نمونه‌ها
+//        while (hi - lo > 1) {          // // حلقهٔ جستجو
+//            int mid = (lo + hi) >>> 1; // // اندیس میانی
+//            if (acc[mid] < s) lo = mid; else hi = mid; // // انتخاب بازه
 //        }
-//        // درون‌یابی خطی بین lo..hi //
-//        double seg = cum[hi] - cum[lo];                         // // طول سگمنت
-//        double ratio = (seg<=1e-6)?0.0: (s - cum[lo]) / seg;    // // نسبت
-//        return ((double)lo + ratio) / (double)SAMPLES;          // // t تقریبی
+//        double seg = acc[hi] - acc[lo];                 // // طول سگمنت یافت‌شده
+//        double ratio = (seg <= 1e-6) ? 0.0 : (s - acc[lo]) / seg; // // نسبت درون سگمنت
+//        return ((double) lo + ratio) / (double) S;      // // t متناظر با s
 //    }
 //
-//    public Point getPositionAt(double positionInLane){ // // مرکز خودرو روی لِین
-//        double L = getLength();                                  // // طول مسیر
-//        if (L < 1e-6) { Point P = parentRoad.getStartIntersection().getPosition(); return new Point(P.getX(), P.getY()); } // // محافظت
+//    public Point getPositionAt(double positionInLane) { // // مرکز خودرو روی این لِین در فاصلهٔ داده‌شده
+//        double L = getLength();                         // // طول لِین
+//        if (L < 1e-6) {                                 // // محافظت از تقسیم بر صفر
+//            Point A = parentRoad.getStartIntersection().getPosition(); // // گرفتن نقطهٔ شروع
+//            return new Point(A.getX(), A.getY());       // // بازگرداندن همان نقطه
+//        }
 //
-//        // جهت واقعی حرکت: EAST/SOUTH = +1 ، WEST/NORTH = -1 //
-//        int sideSign = (direction==Direction.EAST || direction==Direction.SOUTH) ? (+1) : (-1); // // علامت
+//        int sideSign = (direction == Direction.EAST || direction == Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
+//        double s = positionInLane;                      // // فاصلهٔ روی مسیر
+//        if (sideSign < 0) s = L - s;                    // // معکوس کردن برای جهت مخالف
 //
-//        // s فیزیکی روی مسیر مرکزی //
-//        double s = positionInLane;                                // // فاصلهٔ موردنظر
-//        if (sideSign < 0) s = L - s;                              // // معکوس برای جهت برعکس
+//        double t = sToT(s);                             // // نگاشت s به t
+//        Point2D c = parentRoad.curvePoint(t);           // // نقطهٔ مرکزی مسیر
+//        Point2D tan = parentRoad.curveTangent(t);       // // بردار مماس مسیر
+//        double lenT = Math.hypot(tan.getX(), tan.getY()); // // طول بردار مماس
+//        if (lenT < 1e-6) lenT = 1.0;                    // // جلوگیری از صفر
+//        double nx = -tan.getY() / lenT;                 // // مؤلفهٔ X نرمال چپ مسیر
+//        double ny =  tan.getX() / lenT;                 // // مؤلفهٔ Y نرمال چپ مسیر
 //
-//        // نگاشت s→t //
-//        double t = sToT(s);                                       // // t متناظر
+//        int lanesF = parentRoad.getForwardLanes().size(); // // تعداد لِین‌های جهت رفت
+//        int lanesB = parentRoad.getBackwardLanes().size(); // // تعداد لِین‌های جهت برگشت
+//        int perSide = Math.max(lanesF, lanesB);           // // بیشینهٔ لِین برای هر سمت
+//        double groupW = perSide * UIConstants.LANE_WIDTH
+//                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنای گروه یک سمت
+//        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupW * 0.5; // // فاصلهٔ مرکز گروه از مرکز راه
+//        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // افست بین لِین‌ها
 //
-//        // نقطه و مماس مسیر مرکزی در t //
-//        Point2D center = parentRoad.curvePoint(t);                // // نقطهٔ مرکزی
-//        Point2D tan    = parentRoad.curveTangent(t);              // // بردار مماس
+//        double lateral = sideSign * sideCenter + (-offsetIndex * perLaneOffset * sideSign); // // افست جانبی نهایی
 //
-//        // نرمالِ چپِ مسیر مرکزی (nx,ny) //
-//        double lenT = Math.hypot(tan.getX(), tan.getY());         // // طول مماس
-//        if (lenT < 1e-6) lenT = 1;                                // // جلوگیری از صفر
-//        double nx = -tan.getY() / lenT;                           // // نرمال x
-//        double ny =  tan.getX() / lenT;                           // // نرمال y
-//
-//        // محاسبهٔ آفست جانبی برای گروه جهت‌ها و جایگاه لِین در گروه //
-//        int lanesF = parentRoad.getForwardLanes().size();         // // تعداد رفت
-//        int lanesB = parentRoad.getBackwardLanes().size();        // // تعداد برگشت
-//        int perSide = Math.max(lanesF, lanesB);                   // // بیشینهٔ هر سمت
-//        double groupWidth = perSide * UIConstants.LANE_WIDTH
-//                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنای گروه
-//        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupWidth * 0.5; // // فاصلهٔ مرکز گروه از مرکز راه
-//        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // آفست درون‌گروه
-//
-//        double lateral = sideSign * sideCenter + (-offsetIndex * perLaneOffset * sideSign); // // آفست کل جانبی
-//
-//        int x = (int)Math.round(center.getX() + nx * lateral);   // // X نهایی
-//        int y = (int)Math.round(center.getY() + ny * lateral);   // // Y نهایی
-//        return new Point(x, y);                                   // // خروجی
+//        int x = (int) Math.round(c.getX() + nx * lateral); // // مختصات X مرکز خودرو
+//        int y = (int) Math.round(c.getY() + ny * lateral); // // مختصات Y مرکز خودرو
+//        return new Point(x, y);                             // // بازگرداندن نقطهٔ نهایی
 //    }
 //
-//    public double getAngleRadians(){ // // زاویهٔ رندر در موضع فعلی لِین
-//        // از مشتق مسیر مرکزی استفاده می‌کنیم؛ جهت مخالف ۱۸۰ درجه می‌چرخد.
-//        Point2D tan = parentRoad.curveTangent(0.5);               // // مماس تقریبی (میان مسیر)
-//        double angle = Math.atan2(tan.getY(), tan.getX());        // // زاویهٔ A→B
-//        if (direction==Direction.WEST || direction==Direction.NORTH) angle += Math.PI; // // چرخش برای جهت معکوس
-//        return angle;                                             // // خروجی
+//    public double getAngleRadians() {                     // // زاویهٔ حرکت خودرو روی این لِین (رادیان)
+//        Point2D tan = parentRoad.curveTangent(0.5);       // // مماس در میانهٔ مسیر
+//        double a = Math.atan2(tan.getY(), tan.getX());    // // زاویهٔ A→B
+//        if (direction == Direction.WEST || direction == Direction.NORTH) a += Math.PI; // // تصحیح برای جهت معکوس
+//        return a;                                         // // بازگرداندن زاویه
 //    }
 //}
-////
 //
 //
 //
@@ -280,131 +388,96 @@ public class Lane implements Identifiable { // // لاین یک‌طرفه
 //
 //
 //
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-////9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
 ////package infrastructure; // // پکیج زیرساخت
 ////
-////import core.Direction;   // // جهت حرکت لِین
-////import core.Identifiable; // // برای شناسه
-////import core.Point;       // // مختصات جهان
-////import ui.UIConstants;   // // ثوابت UI
+////import core.Direction;         // // جهت
+////import core.Identifiable;      // // اینترفیس شناسه
+////import core.Point;             // // نقطه
+////import ui.UIConstants;         // // ثوابت UI
+////import java.awt.geom.Point2D;  // // نقطهٔ اعشاری
 ////
-////public class Lane implements Identifiable { // // مسیر یک‌طرفه روی یک Road
-////    private final String id;           // // شناسه یکتا
-////    private final Direction direction; // // جهت لِین
+////public class Lane implements Identifiable { // // لِین یک‌طرفه
+////    private final String id;           // // شناسه
+////    private final Direction direction; // // جهت حرکت
 ////    private final Road parentRoad;     // // جادهٔ والد
 ////
 ////    private Lane leftAdjacentLane;     // // همسایهٔ چپ
 ////    private Lane rightAdjacentLane;    // // همسایهٔ راست
+////    private int offsetIndex = 0;       // // جایگاه در گروه همان جهت (۰،۱،۲…)
 ////
-////    private int offsetIndex = 0;       // // ایندکس درون «گروهِ همان جهت» (-1 چپ، +1 راست)
-////
-////    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
-////        this.id = id;                 // // ست ID
-////        this.direction = direction;   // // ست جهت
-////        this.parentRoad = parentRoad; // // ست جاده
+////    public Lane(String id, Direction direction, Road parentRoad){ // // سازنده
+////        this.id=id; this.direction=direction; this.parentRoad=parentRoad;        // // ست‌ها
 ////    }
 ////
-////    @Override
-////    public String getId() { // // گتر ID
-////        return id;
+////    @Override public String getId(){ return id; }                                // // گتر ID
+////    public Direction getDirection(){ return direction; }                         // // گتر جهت
+////    public Road getParentRoad(){ return parentRoad; }                            // // گتر جاده
+////    public void setLeftAdjacentLane(Lane l){ this.leftAdjacentLane=l; }          // // ست چپ
+////    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane=l; }        // // ست راست
+////    public void setOffsetIndex(int index){ this.offsetIndex=index; }             // // ست ایندکس
+////
+////    // --- طول تقریبی مسیر لِین از روی مسیر مرکزی جاده ---
+////    public double getLength(){                                                   // // طول
+////        final int S = 24;                                                        // // نمونه
+////        double L=0;                                                              // // جمع
+////        Point2D prev = parentRoad.curvePoint(0.0);                               // // t=0
+////        for(int i=1;i<=S;i++){                                                   // // حلقه
+////            Point2D p = parentRoad.curvePoint((double)i/S);                      // // نقطه
+////            L += prev.distance(p);                                               // // افزایش
+////            prev = p;                                                            // // آپدیت
+////        }
+////        return L;                                                                // // خروجی
 ////    }
 ////
-////    public Direction getDirection() { // // گتر جهت
-////        return direction;
+////    // --- نگاشت فاصله s به پارامتر t (برای حرکت یکنواخت روی منحنی) ---
+////    private double sToT(double s){                                               // // نگاشت
+////        final int S=60;                                                          // // نمونه زیاد
+////        double[] acc = new double[S+1];                                          // // طول تجمعی
+////        acc[0]=0;                                                                // // شروع
+////        Point2D prev = parentRoad.curvePoint(0.0);                               // // t=0
+////        for(int i=1;i<=S;i++){                                                   // // حلقه
+////            Point2D p = parentRoad.curvePoint((double)i/S);                      // // نقطه
+////            acc[i] = acc[i-1] + prev.distance(p);                                // // تجمعی
+////            prev = p;                                                            // // آپدیت
+////        }
+////        double total = acc[S];                                                   // // کل
+////        if (s<=0) return 0.0; if (s>=total) return 1.0;                          // // کلیپ
+////        int lo=0,hi=S;                                                           // // باینری سرچ
+////        while(hi-lo>1){ int mid=(lo+hi)>>>1; if (acc[mid]<s) lo=mid; else hi=mid; } // // جستجو
+////        double seg=acc[hi]-acc[lo]; double ratio=(seg<=1e-6)?0.0:(s-acc[lo])/seg; // // نسبت
+////        return ((double)lo+ratio)/(double)S;                                     // // t
 ////    }
 ////
-////    public Road getParentRoad() { // // گتر جادهٔ والد
-////        return parentRoad;
+////    // --- مرکز خودرو روی لِین با رعایت جداسازی لِین‌ها ---
+////    public Point getPositionAt(double positionInLane){                            // // نقطه روی لِین
+////        double L = getLength();                                                   // // طول لِین
+////        if (L < 1e-6){ Point A = parentRoad.getStartIntersection().getPosition(); return new Point(A.getX(),A.getY()); } // // محافظت
+////        int sideSign = (direction==Direction.EAST || direction==Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
+////        double s = positionInLane; if (sideSign<0) s = L - s;                     // // فاصله روی مسیر
+////        double t = sToT(s);                                                       // // t متناظر
+////        Point2D c = parentRoad.curvePoint(t);                                     // // نقطهٔ مرکزی
+////        Point2D tan = parentRoad.curveTangent(t);                                 // // بردار مماس
+////        double lenT = Math.hypot(tan.getX(), tan.getY()); if (lenT<1e-6) lenT=1;  // // طول مماس
+////        double nx = -tan.getY()/lenT, ny = tan.getX()/lenT;                       // // نرمال چپ مسیر
+////
+////        int lanesF = parentRoad.getForwardLanes().size();                         // // تعداد رفت
+////        int lanesB = parentRoad.getBackwardLanes().size();                        // // تعداد برگشت
+////        int perSide = Math.max(lanesF, lanesB);                                   // // بیشینه هر سمت
+////        double groupW = perSide*UIConstants.LANE_WIDTH + Math.max(0,perSide-1)*UIConstants.LANE_GAP; // // پهنای گروه
+////        double sideCenter = UIConstants.LANE_GAP*0.5 + groupW*0.5;                // // فاصله مرکز گروه
+////        double perLaneOffset = (UIConstants.LANE_WIDTH*0.5) + (UIConstants.LANE_GAP*0.5); // // آفست درون گروه
+////        double lateral = sideSign*sideCenter + (-offsetIndex*perLaneOffset*sideSign);      // // آفست کل
+////
+////        int x=(int)Math.round(c.getX()+nx*lateral);                                // // X
+////        int y=(int)Math.round(c.getY()+ny*lateral);                                // // Y
+////        return new Point(x,y);                                                     // // خروجی
 ////    }
 ////
-////    public Lane getLeftAdjacentLane() { return leftAdjacentLane; }   // // همسایهٔ چپ
-////    public Lane getRightAdjacentLane(){ return rightAdjacentLane; }  // // همسایهٔ راست
-////    public void setLeftAdjacentLane(Lane l) { this.leftAdjacentLane = l; }   // // ست چپ
-////    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane = l; }  // // ست راست
-////    public void setOffsetIndex(int index){ this.offsetIndex = index; }       // // ست ایندکس
-////
-////    // --------------------- هندسه: طول/مکان/زاویه ---------------------
-////
-////    public double getLength() { // // طول لِین
-////        Point A = parentRoad.getStartIntersection().getPosition(); // // نقطهٔ شروع
-////        Point B = parentRoad.getEndIntersection().getPosition();   // // نقطهٔ پایان
-////        double dx = B.getX() - A.getX(); // // Δx
-////        double dy = B.getY() - A.getY(); // // Δy
-////        return Math.sqrt(dx*dx + dy*dy); // // طول
-////    }
-////
-////    public Point getPositionAt(double positionInLane) {
-////        // // مختصات «مرکز خودرو» روی این لِین با احتساب جداسازی جهت‌ها و چندلاینه
-////
-////        Point A = parentRoad.getStartIntersection().getPosition(); // // A
-////        Point B = parentRoad.getEndIntersection().getPosition();   // // B
-////        double dx = B.getX() - A.getX(); // // Δx
-////        double dy = B.getY() - A.getY(); // // Δy
-////        double len = Math.sqrt(dx*dx + dy*dy); // // طول
-////
-////        if (len < 1e-6) return new Point(A.getX(), A.getY()); // // محافظت از تقسیم بر صفر
-////
-////        // واحد جهت مسیرِ Road (A→B) //
-////        double ux = dx / len; // // بردار واحد طولی x
-////        double uy = dy / len; // // بردار واحد طولی y
-////
-////        // بردار عمودِ «چپِ A→B» (برای جابه‌جایی جانبی) //
-////        double nx = -uy; // // نرمال x
-////        double ny =  ux; // // نرمال y
-////
-////        // نسبت پیشروی روی راه (0..1) //
-////        double t = positionInLane / len; // // t
-////        // برای پایداری، کلیپ //
-////        if (t < 0) t = 0; if (t > 1) t = 1; // // کلیپ
-////
-////        // نقطهٔ مرکزی روی خطِ مرکزی راه //
-////        double cx = A.getX() + ux * (t * len); // // X مرکزی
-////        double cy = A.getY() + uy * (t * len); // // Y مرکزی
-////
-////        // --- محاسبهٔ عرض بصری راه بر اساس تعداد لِین‌ها ---
-////        int lanesF = parentRoad.getForwardLanes().size(); // // تعداد لِین‌های جهت رفت
-////        int lanesB = parentRoad.getBackwardLanes().size();// // تعداد لِین‌های جهت برگشت
-////        int perSide = Math.max(lanesF, lanesB);           // // حداکثر لِین در هر سمت
-////
-////        // پهنای گروه یک سمت (فقط همان جهت) //
-////        double groupWidth = perSide * UIConstants.LANE_WIDTH
-////                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنا گروه
-////
-////        // فاصلهٔ مرکز هر گروه از خط وسط راه (نیمِ شکاف وسط + نیمِ پهنای گروه) //
-////        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupWidth * 0.5; // // مرکز گروه
-////
-////        // جابه‌جایی درون گروه برای این لِین (نصف پهنای یک لِین + نصف فاصلهٔ بین‌لاین) //
-////        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // آفست درون‌گروه
-////
-////        // علامت سمت: +1 برای جهت «رو به جلو» (E/S) ، -1 برای جهت «برگشتی» (W/N) //
-////        int sideSign = (direction == Direction.EAST || direction == Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
-////
-////        // آفست کل جانبی: مرکزِ گروه ± آفست درون‌گروه با توجه به چپ/راستِ همان جهت //
-////        double lateral = sideSign * sideCenter                             // // انتقال گروه از مرکز راه
-////                + (-offsetIndex * perLaneOffset * sideSign);        // // جابه‌جایی درون گروه (چپ/راست)
-////
-////        // مختصات نهایی با انتقال روی نرمال //
-////        int x = (int)Math.round(cx + nx * lateral); // // X نهایی
-////        int y = (int)Math.round(cy + ny * lateral); // // Y نهایی
-////        return new Point(x, y); // // خروجی
-////    }
-////
-////    public double getAngleRadians() { // // زاویهٔ A→B برای رندر
-////        Point A = parentRoad.getStartIntersection().getPosition(); // // A
-////        Point B = parentRoad.getEndIntersection().getPosition();   // // B
-////        double dx = B.getX() - A.getX(); // // Δx
-////        double dy = B.getY() - A.getY(); // // Δy
-////        return Math.atan2(dy, dx); // // زاویه
+////    public double getAngleRadians(){                                              // // زاویهٔ کلی لِین
+////        Point2D tan = parentRoad.curveTangent(0.5);                               // // مماس وسط مسیر
+////        double a = Math.atan2(tan.getY(), tan.getX());                            // // زاویه A→B
+////        if (direction==Direction.WEST || direction==Direction.NORTH) a += Math.PI;// // ۱۸۰ درجه برای جهت معکوس
+////        return a;                                                                  // // خروجی
 ////    }
 ////}
 ////
@@ -430,131 +503,123 @@ public class Lane implements Identifiable { // // لاین یک‌طرفه
 ////
 ////
 ////
-//////777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
-//////
+////
+////
+////
+////
+////
+////
+////
+////
+////
+////
+////
+////
 //////package infrastructure; // // پکیج زیرساخت
 //////
-//////import core.Direction;   // // جهت حرکت لاین (N/E/S/W)
-//////import core.Identifiable; // // برای داشتن شناسه یکتا
-//////import core.Point;       // // نوع نقطه (مختصات جهان) — توجه: این core.Point است، نه java.awt.Point
+//////import core.Direction; // // جهت
+//////import core.Identifiable; // // اینترفیس شناسه
+//////import core.Point; // // نقطه
+//////import ui.UIConstants; // // ثوابت UI
+//////import java.awt.geom.Point2D; // // نقطه اعشاری
 //////
-//////public class Lane implements Identifiable { // // مسیر یک‌طرفه درون یک Road
-//////    private final String id;           // // شناسه یکتا برای لاین
-//////    private final Direction direction; // // جهت حرکت این لاین
-//////    private final Road parentRoad;     // // جادهٔ والد که این لاین روی آن قرار دارد
+//////public class Lane implements Identifiable { // // لاین یک‌طرفه
+//////    private final String id; // // شناسه
+//////    private final Direction direction; // // جهت
+//////    private final Road parentRoad; // // جادهٔ والد
 //////
-//////    private Lane leftAdjacentLane;     // // لاین کناری در سمت چپ (اگر وجود داشته باشد)
-//////    private Lane rightAdjacentLane;    // // لاین کناری در سمت راست (اگر وجود داشته باشد)
+//////    private Lane leftAdjacentLane; // // همسایه چپ
+//////    private Lane rightAdjacentLane; // // همسایه راست
+//////    private int offsetIndex = 0; // // ایندکس در گروه همان‌جهت
 //////
-//////    // --- آفست جانبی برای جدا کردن مسیر هندسی هر لاین از خط مرکزی راه ---
-//////    // مقدار -1 یعنی کمی به چپ مسیر اصلی، +1 یعنی کمی به راست مسیر اصلی (نسبت به جهت همین لاین)
-//////    private int offsetIndex = 0;       // // پیش‌فرض 0 (روی خط مرکزی راه)
-//////
-//////    public Lane(String id, Direction direction, Road parentRoad) { // // سازندهٔ لاین
-//////        this.id = id;                 // // ذخیره شناسه
-//////        this.direction = direction;   // // ذخیره جهت
-//////        this.parentRoad = parentRoad; // // ذخیره جاده والد
-//////        this.leftAdjacentLane = null; // // در ابتدا همسایه ندارد
-//////        this.rightAdjacentLane = null;// // در ابتدا همسایه ندارد
+//////    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
+//////        this.id = id; // // ست
+//////        this.direction = direction; // // ست
+//////        this.parentRoad = parentRoad; // // ست
 //////    }
 //////
-//////    @Override
-//////    public String getId() { // // گتر شناسه
-//////        return id; // // برگرداندن ID
-//////    }
+//////    @Override public String getId(){ return id; } // // گتر ID
+//////    public Direction getDirection(){ return direction; } // // گتر جهت
+//////    public Road getParentRoad(){ return parentRoad; } // // گتر جاده
+//////    public Lane getLeftAdjacentLane(){ return leftAdjacentLane; } // // گتر چپ
+//////    public Lane getRightAdjacentLane(){ return rightAdjacentLane; } // // گتر راست
+//////    public void setLeftAdjacentLane(Lane l){ this.leftAdjacentLane = l; } // // ست چپ
+//////    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane = l; } // // ست راست
+//////    public void setOffsetIndex(int index){ this.offsetIndex = index; } // // ست ایندکس
 //////
-//////    public Direction getDirection() { // // گتر جهت
-//////        return direction; // // برگرداندن جهت
-//////    }
-//////
-//////    public Road getParentRoad() { // // گتر جادهٔ والد
-//////        return parentRoad; // // برگرداندن Road
-//////    }
-//////
-//////    // --------------------- همسایه‌های کناری (برای تغییر لاین/سبقت) ---------------------
-//////
-//////    public Lane getLeftAdjacentLane() { // // لاین سمت چپ
-//////        return leftAdjacentLane; // // ممکن است null باشد
-//////    }
-//////
-//////    public Lane getRightAdjacentLane() { // // لاین سمت راست
-//////        return rightAdjacentLane; // // ممکن است null باشد
-//////    }
-//////
-//////    public void setLeftAdjacentLane(Lane lane) { // // ست کردن همسایهٔ چپ
-//////        this.leftAdjacentLane = lane; // // ذخیرهٔ ارجاع
-//////    }
-//////
-//////    public void setRightAdjacentLane(Lane lane) { // // ست کردن همسایهٔ راست
-//////        this.rightAdjacentLane = lane; // // ذخیرهٔ ارجاع
-//////    }
-//////
-//////    // --------------------- آفست جانبی (برای عریض کردن بصری خیابان) ---------------------
-//////
-//////    public void setOffsetIndex(int index) { // // تعیین ایندکس آفست جانبی این لاین
-//////        this.offsetIndex = index; // // -1 = چپ، +1 = راست (نسبت به جهت همین لاین)
-//////    }
-//////
-//////    // --------------------- هندسهٔ لاین: طول، موقعیت، زاویه ---------------------
-//////
-//////    public double getLength() { // // طول هندسی لاین (فاصلهٔ دو تقاطع Road)
-//////        Point A = parentRoad.getStartIntersection().getPosition(); // // مختصات تقاطع شروع
-//////        Point B = parentRoad.getEndIntersection().getPosition();   // // مختصات تقاطع پایان
-//////        double dx = B.getX() - A.getX(); // // اختلاف X
-//////        double dy = B.getY() - A.getY(); // // اختلاف Y
-//////        return Math.sqrt(dx * dx + dy * dy); // // طول با قضیهٔ فیثاغورس
-//////    }
-//////
-//////    public Point getPositionAt(double positionInLane) {
-//////        // // خروجی: «مختصات جهان» نقطه‌ای روی این لاین، با احتساب «آفست جانبی»
-//////        // // ورودی positionInLane فاصلهٔ طی‌شده از ابتدای لاین است (0..طول لاین)
-//////
-//////        Point A = parentRoad.getStartIntersection().getPosition(); // // نقطهٔ شروع راه
-//////        Point B = parentRoad.getEndIntersection().getPosition();   // // نقطهٔ پایان راه
-//////
-//////        double dx = B.getX() - A.getX(); // // مؤلفهٔ X بردار راه
-//////        double dy = B.getY() - A.getY(); // // مؤلفهٔ Y بردار راه
-//////        double len = Math.sqrt(dx * dx + dy * dy); // // طول راه
-//////
-//////        if (len <= 0.0001) { // // اگر طول تقریباً صفر بود (ایراد داده)
-//////            return new Point(A.getX(), A.getY()); // // همان نقطهٔ شروع را برگردان
+//////    public double getLength(){ // // طول تقریبی مسیر مرکزی
+//////        final int SAMPLES = 24; // // تعداد نمونه
+//////        double length = 0.0; // // مجموع
+//////        Point2D prev = parentRoad.curvePoint(0.0); // // نقطه اول
+//////        for(int i=1;i<=SAMPLES;i++){ // // حلقه
+//////            double t = (double)i / (double)SAMPLES; // // t
+//////            Point2D p = parentRoad.curvePoint(t); // // نقطه
+//////            length += prev.distance(p); // // جمع طول
+//////            prev = p; // // به‌روزرسانی
 //////        }
-//////
-//////        // t = نسبت پیشروی روی خط مرکزی راه (0..1) //
-//////        double t = positionInLane / len; // // تبدیل فاصله به نسبت
-//////        if (t < 0) t = 0; // // کلیپ پایین
-//////        if (t > 1) t = 1; // // کلیپ بالا
-//////
-//////        // مختصات نقطهٔ روی خط مرکزی (بدون آفست جانبی) //
-//////        double cx = A.getX() + dx * t; // // X مرکزی
-//////        double cy = A.getY() + dy * t; // // Y مرکزی
-//////
-//////        // بردار عمود واحد روی مسیر: برای (dx,dy)، عمود = (-dy, +dx) / len //
-//////        double nx = -dy / len; // // X عمود واحد
-//////        double ny =  dx / len; // // Y عمود واحد
-//////
-//////        // فاصلهٔ جانبی هر لاین نسبت به خط مرکزی:
-//////        // perLaneOffset = نصف پهنای یک لاین + نصف فاصلهٔ میان لاین‌ها
-//////        double halfLane = ui.UIConstants.LANE_WIDTH * 0.5; // // نصف پهنای یک لاین (از UIConstants)
-//////        double halfGap  = ui.UIConstants.LANE_GAP  * 0.5;  // // نصف فاصلهٔ بین لاین‌ها
-//////        double perLaneOffset = halfLane + halfGap; // // مجموع آفست جانبی برای هر لاین از مرکز
-//////
-//////        // آفست نهایی این لاین (بر حسب ایندکس سمت چپ/راست)
-//////        double lateral = offsetIndex * perLaneOffset; // // -1=چپ، +1=راست
-//////
-//////        // انتقال نقطهٔ مرکزی به سمت عمود (چپ/راست) //
-//////        int x = (int) Math.round(cx + nx * lateral); // // X نهایی
-//////        int y = (int) Math.round(cy + ny * lateral); // // Y نهایی
-//////
-//////        return new Point(x, y); // // مختصات جهانِ نهاییِ این لاین
+//////        return length; // // خروجی
 //////    }
 //////
-//////    public double getAngleRadians() { // // زاویهٔ حرکت نسبت به محور X (برای rotate تصویر خودرو)
-//////        Point A = parentRoad.getStartIntersection().getPosition(); // // شروع
-//////        Point B = parentRoad.getEndIntersection().getPosition();   // // پایان
-//////        double dx = B.getX() - A.getX(); // // ΔX
-//////        double dy = B.getY() - A.getY(); // // ΔY
-//////        return Math.atan2(dy, dx); // // زاویه بر حسب رادیان
+//////    private double sToT(double s){ // // نگاشت فاصله به پارامتر t
+//////        final int SAMPLES = 60; // // نمونه زیاد
+//////        double[] cum = new double[SAMPLES+1]; // // جدول تجمعی
+//////        cum[0] = 0; // // اول صفر
+//////        Point2D prev = parentRoad.curvePoint(0.0); // // نقطه 0
+//////        for(int i=1;i<=SAMPLES;i++){ // // حلقه
+//////            double t = (double)i / (double)SAMPLES; // // t
+//////            Point2D p = parentRoad.curvePoint(t); // // نقطه
+//////            cum[i] = cum[i-1] + prev.distance(p); // // تجمعی
+//////            prev = p; // // آپدیت
+//////        }
+//////        double total = cum[SAMPLES]; // // کل طول
+//////        if (s <= 0) return 0.0; // // کلیپ
+//////        if (s >= total) return 1.0; // // کلیپ
+//////        int lo = 0, hi = SAMPLES; // // مرزها
+//////        while(hi - lo > 1){ // // باینری سرچ
+//////            int mid = (lo + hi) >>> 1; // // وسط
+//////            if (cum[mid] < s) lo = mid; else hi = mid; // // انتخاب نیمه
+//////        }
+//////        double seg = cum[hi] - cum[lo]; // // طول سگمنت
+//////        double ratio = (seg<=1e-6)?0.0: (s - cum[lo]) / seg; // // نسبت
+//////        return ((double)lo + ratio) / (double)SAMPLES; // // t
+//////    }
+//////
+//////    public Point getPositionAt(double positionInLane){ // // مرکز خودرو روی لاین
+//////        double L = getLength(); // // طول
+//////        if (L < 1e-6) { // // محافظت
+//////            Point P = parentRoad.getStartIntersection().getPosition(); // // نقطه A
+//////            return new Point(P.getX(), P.getY()); // // بازگشت
+//////        }
+//////        int sideSign = (direction==Direction.EAST || direction==Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
+//////        double s = positionInLane; // // فاصله روی مسیر
+//////        if (sideSign < 0) s = L - s; // // معکوس برای جهت مخالف
+//////        double t = sToT(s); // // نگاشت s→t
+//////        Point2D center = parentRoad.curvePoint(t); // // نقطه مرکزی
+//////        Point2D tan = parentRoad.curveTangent(t); // // بردار مماس
+//////        double lenT = Math.hypot(tan.getX(), tan.getY()); // // طول مماس
+//////        if (lenT < 1e-6) lenT = 1; // // جلوگیری از صفر
+//////        double nx = -tan.getY() / lenT; // // نرمال x
+//////        double ny =  tan.getX() / lenT; // // نرمال y
+//////
+//////        int lanesF = parentRoad.getForwardLanes().size(); // // تعداد رفت
+//////        int lanesB = parentRoad.getBackwardLanes().size(); // // تعداد برگشت
+//////        int perSide = Math.max(lanesF, lanesB); // // بیشینه هر سمت
+//////        double groupWidth = perSide * UIConstants.LANE_WIDTH
+//////                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنای گروه
+//////        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupWidth * 0.5; // // فاصله مرکز گروه
+//////        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // آفست درون گروه
+//////
+//////        double lateral = sideSign * sideCenter + (-offsetIndex * perLaneOffset * sideSign); // // آفست کل
+//////        int x = (int)Math.round(center.getX() + nx * lateral); // // X
+//////        int y = (int)Math.round(center.getY() + ny * lateral); // // Y
+//////        return new Point(x, y); // // خروجی
+//////    }
+//////
+//////    public double getAngleRadians(){ // // زاویهٔ کلی لاین
+//////        Point2D tan = parentRoad.curveTangent(0.5); // // مماس میان مسیر
+//////        double angle = Math.atan2(tan.getY(), tan.getX()); // // زاویه A→B
+//////        if (direction==Direction.WEST || direction==Direction.NORTH) angle += Math.PI; // // ۱۸۰ درجه برای معکوس
+//////        return angle; // // خروجی
 //////    }
 //////}
 //////
@@ -586,545 +651,277 @@ public class Lane implements Identifiable { // // لاین یک‌طرفه
 //////
 //////
 //////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
+////////package infrastructure; // // پکیج زیرساخت
 ////////
-////////// infrastructure/Lane.java
-////////package infrastructure;
+////////import core.Direction;         // // جهت
+////////import core.Identifiable;      // // برای ID
+////////import core.Point;             // // مختصات صحیح پروژه
+////////import ui.UIConstants;         // // ثوابت UI
 ////////
-////////import java.util.*;
-////////import core.*;
-//////
-////////public class Lane implements Identifiable {
-////////    private String id;
-////////    private Direction direction;
-////////    private Road parentRoad;
-////////    private int offsetIndex;
-////////    private static final int LANE_CENTER_OFFSET_PX = 14;
+////////import java.awt.geom.Point2D;  // // برای محاسبات اعشاری
 ////////
-////////    public Lane(String id, Direction dir, Road road, int offset){
-////////        this.id=id; this.direction=dir; this.parentRoad=road; this.offsetIndex=offset;
+////////public class Lane implements Identifiable { // // مسیر یک‌طرفه
+////////    private final String id;               // // شناسه
+////////    private final Direction direction;     // // جهت حرکت لِین
+////////    private final Road parentRoad;         // // جادهٔ والد
+////////
+////////    private Lane leftAdjacentLane;         // // همسایهٔ چپ
+////////    private Lane rightAdjacentLane;        // // همسایهٔ راست
+////////    private int offsetIndex = 0;           // // ایندکس درون گروه همان جهت
+////////
+////////    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
+////////        this.id = id; this.direction = direction; this.parentRoad = parentRoad; // // ست‌ها
 ////////    }
 ////////
-////////    @Override public String getId(){ return id; }
-////////    public Direction getDirection(){ return direction; }
-////////    public Road getParentRoad(){ return parentRoad; }
-////////    public int getOffsetIndex(){ return offsetIndex; }
-////////    public void setOffsetIndex(int idx){ this.offsetIndex=idx; }
+////////    @Override public String getId(){ return id; }       // // گتر ID
+////////    public Direction getDirection(){ return direction; } // // گتر جهت
+////////    public Road getParentRoad(){ return parentRoad; }    // // گتر جاده
+////////    public Lane getLeftAdjacentLane(){ return leftAdjacentLane; }   // // چپ
+////////    public Lane getRightAdjacentLane(){ return rightAdjacentLane; } // // راست
+////////    public void setLeftAdjacentLane(Lane l){ this.leftAdjacentLane = l; } // // ست چپ
+////////    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane = l; } // // ست راست
+////////    public void setOffsetIndex(int index){ this.offsetIndex = index; } // // ست ایندکس
 ////////
-////////    public double getLength(){ return parentRoad!=null ? parentRoad.getLengthMeters() : 0; }
-////////
-////////    public double getAngleRadians(){
-////////        if(parentRoad==null) return 0;
-////////        Point a = parentRoad.getStartIntersection().getPosition();
-////////        Point b = parentRoad.getEndIntersection().getPosition();
-////////        double dx=b.getX()-a.getX(), dy=b.getY()-a.getY();
-////////        return Math.atan2(dy,dx);
-////////    }
-////////
-////////    public Point getPositionAt(double s){
-////////        if(parentRoad==null) return new Point(0,0);
-////////        Point a=parentRoad.getStartIntersection().getPosition();
-////////        Point b=parentRoad.getEndIntersection().getPosition();
-////////        int dx=b.getX()-a.getX(), dy=b.getY()-a.getY();
-////////        double len=Math.sqrt(dx*dx+dy*dy); if(len<1e-6) return a;
-////////        double t=s/len; if(t<0) t=0; if(t>1) t=1;
-////////        double cx=a.getX()+t*dx, cy=a.getY()+t*dy;
-////////        double nx=-dy/len, ny=dx/len;
-////////        double off=offsetIndex*LANE_CENTER_OFFSET_PX;
-////////        return new Point((int)Math.round(cx+nx*off),(int)Math.round(cy+ny*off));
-////////    }
-////////}
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-////////package infrastructure;
-////////
-////////import core.Identifiable;
-////////import core.Direction;
-////////import core.Point;
-////////import core.Vehicle;
-////////
-////////import java.util.ArrayList;
-////////import java.util.List;
-////////
-////////public class Lane implements Identifiable {
-////////    private final String id;
-////////    private final Direction direction;
-////////    private final List<Vehicle> vehicles = new ArrayList<>();
-////////    private Road parentRoad;
-////////    private final List<SpeedBump> speedBumps = new ArrayList<>();
-////////    private int offsetIndex = 0; // برای چند لاینه‌ها
-////////
-////////    private static final int LANE_CENTER_OFFSET_PX = 14;
-////////
-////////    public Lane(String id, Direction direction, Road parentRoad) {
-////////        this.id = id;
-////////        this.direction = direction;
-////////        this.parentRoad = parentRoad;
-////////    }
-////////
-////////    @Override public String getId() { return id; }
-////////    public Direction getDirection() { return direction; }
-////////    public Road getParentRoad() { return parentRoad; }
-////////    public void setParentRoad(Road r) { this.parentRoad = r; }
-////////
-////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; }
-////////    public int getOffsetIndex() { return offsetIndex; }
-////////
-////////    public List<Vehicle> getVehicles() { return vehicles; }
-////////    public List<SpeedBump> getSpeedBumps() { return speedBumps; }
-////////
-////////    /** طول لِین (برابر طول جاده) */
-////////    public double getLength() { return parentRoad != null ? parentRoad.getGeometricLength() : 0.0; }
-////////
-////////    /** زاویه رندر نسبت به محور x (رادیان) */
-////////    public double getAngleRadians() {
-////////        if (parentRoad == null) return 0.0;
-////////        Point a = parentRoad.getStartIntersection().getPosition();
-////////        Point b = parentRoad.getEndIntersection().getPosition();
-////////        double dx = b.getX() - a.getX();
-////////        double dy = b.getY() - a.getY();
-////////        double ang = Math.atan2(dy, dx);
-////////        // هم‌جهت‌سازی با حرکت لِین
-////////        switch (direction) {
-////////            case WEST: case NORTH: ang += Math.PI; break;
+////////    // ====== طول مسیر مرکزی (تقریبی برای منحنی) ======
+////////    public double getLength(){ // // طول تقریبی (نمونه‌برداری)
+////////        final int SAMPLES = 24;                                   // // تعداد نمونه برای تقریب
+////////        double length = 0.0;                                      // // جمع طول
+////////        Point2D prev = parentRoad.curvePoint(0.0);                // // نقطهٔ t=0
+////////        for(int i=1;i<=SAMPLES;i++){                              // // حلقهٔ نمونه‌ها
+////////            double t = (double)i / (double)SAMPLES;               // // t
+////////            Point2D p = parentRoad.curvePoint(t);                 // // نقطه
+////////            double dx = p.getX() - prev.getX();                   // // Δx
+////////            double dy = p.getY() - prev.getY();                   // // Δy
+////////            length += Math.hypot(dx, dy);                         // // افزایش طول
+////////            prev = p;                                             // // به‌روزرسانی قبلی
 ////////        }
-////////        return ang;
-////////    }
-////////    // برای سازگاری با کدهایی که getAngle می‌خوانند
-////////    public double getAngle() { return getAngleRadians(); }
-////////
-////////    /** نقطه‌ی روی لِین با درنظرگرفتن آفست مرکز لِین‌ها */
-////////    public Point getPositionAt(double s) {
-////////        if (parentRoad == null) return new Point(0, 0);
-////////        Point a = parentRoad.getStartIntersection().getPosition();
-////////        Point b = parentRoad.getEndIntersection().getPosition();
-////////
-////////        int dx = b.getX() - a.getX();
-////////        int dy = b.getY() - a.getY();
-////////        double len = Math.sqrt(dx * dx + dy * dy);
-////////        if (len < 1e-6) return new Point(a.getX(), a.getY());
-////////
-////////        double t = Math.max(0.0, Math.min(1.0, s / len));
-////////        double cx = a.getX() + t * dx;
-////////        double cy = a.getY() + t * dy;
-////////
-////////        double nx = -dy / len;
-////////        double ny =  dx / len;
-////////        double off = offsetIndex * LANE_CENTER_OFFSET_PX;
-////////
-////////        int x = (int)Math.round(cx + nx * off);
-////////        int y = (int)Math.round(cy + ny * off);
-////////        return new Point(x, y);
+////////        return length;                                            // // خروجی
 ////////    }
 ////////
-////////    // لِین مجاور چپ/راست نسبت به جهت حرکت — در صورت نیاز بعداً کامل‌تر می‌کنیم
-////////    public Lane getLeftAdjacentLane()  { return null; }
-////////    public Lane getRightAdjacentLane() { return null; }
-////////}
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-////////
-////////package infrastructure;
-////////
-////////import core.Direction;
-////////import core.Identifiable;
-////////import core.Point;
-////////import core.Vehicle;
-////////
-////////import java.util.ArrayList;
-////////import java.util.List;
-////////
-////////public class Lane implements Identifiable {
-////////    private final String id;
-////////    private final Direction direction;
-////////    private final List<Vehicle> vehicles = new ArrayList<>();
-////////    private Road parentRoad;
-////////    private final List<SpeedBump> speedBumps = new ArrayList<>();
-////////    private int offsetIndex = 0; // برای فاصله‌ی جانبی لاین‌ها
-////////
-////////    private static final int LANE_CENTER_OFFSET_PX = 14;
-////////
-////////    public Lane(String id, Direction dir, Road parent) {
-////////        this.id = id;
-////////        this.direction = dir;
-////////        this.parentRoad = parent;
+////////    // نگاشت از «فاصله s روی لِین» به «t روی منحنی» //
+////////    private double sToT(double s){ // // تقریب معکوس با جدول تجمعی
+////////        final int SAMPLES = 60;                                 // // نمونهٔ زیادتر برای دقت
+////////        double[] cum = new double[SAMPLES+1];                   // // آرایهٔ طول تجمعی
+////////        cum[0] = 0;                                            // // شروع صفر
+////////        Point2D prev = parentRoad.curvePoint(0.0);              // // t=0
+////////        for(int i=1;i<=SAMPLES;i++){                            // // پرکردن جدول
+////////            double t = (double)i / (double)SAMPLES;             // // t
+////////            Point2D p = parentRoad.curvePoint(t);               // // نقطه
+////////            cum[i] = cum[i-1] + prev.distance(p);               // // طول تجمعی
+////////            prev = p;                                           // // قبلی
+////////        }
+////////        double total = cum[SAMPLES];                            // // کل طول
+////////        if (s <= 0) return 0.0; if (s >= total) return 1.0;     // // کلیپ
+////////        // باینری سرچ ساده //
+////////        int lo = 0, hi = SAMPLES;                               // // بازه
+////////        while(hi - lo > 1){                                     // // تا رسیدن به خانه نزدیک
+////////            int mid = (lo + hi) >>> 1;                          // // وسط
+////////            if (cum[mid] < s) lo = mid; else hi = mid;          // // انتخاب نیمه
+////////        }
+////////        // درون‌یابی خطی بین lo..hi //
+////////        double seg = cum[hi] - cum[lo];                         // // طول سگمنت
+////////        double ratio = (seg<=1e-6)?0.0: (s - cum[lo]) / seg;    // // نسبت
+////////        return ((double)lo + ratio) / (double)SAMPLES;          // // t تقریبی
 ////////    }
 ////////
-////////    @Override public String getId() { return id; }
-////////    public Direction getDirection()  { return direction; }
-////////    public Road getParentRoad()      { return parentRoad; }
-////////    public void setParentRoad(Road r){ this.parentRoad = r; }
+////////    public Point getPositionAt(double positionInLane){ // // مرکز خودرو روی لِین
+////////        double L = getLength();                                  // // طول مسیر
+////////        if (L < 1e-6) { Point P = parentRoad.getStartIntersection().getPosition(); return new Point(P.getX(), P.getY()); } // // محافظت
 ////////
-////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; }
-////////    public int  getOffsetIndex()        { return offsetIndex; }
+////////        // جهت واقعی حرکت: EAST/SOUTH = +1 ، WEST/NORTH = -1 //
+////////        int sideSign = (direction==Direction.EAST || direction==Direction.SOUTH) ? (+1) : (-1); // // علامت
 ////////
-////////    public List<Vehicle> getVehicles() { return vehicles; }
-////////    public void addSpeedBump(SpeedBump sb){ if (sb!=null) speedBumps.add(sb); }
-////////    public List<SpeedBump> getSpeedBumps(){ return speedBumps; }
+////////        // s فیزیکی روی مسیر مرکزی //
+////////        double s = positionInLane;                                // // فاصلهٔ موردنظر
+////////        if (sideSign < 0) s = L - s;                              // // معکوس برای جهت برعکس
 ////////
-////////    /** طول لاین = طول هندسی جاده */
-////////    public double getLength() {
-////////        return (parentRoad == null) ? 0.0 : parentRoad.getGeometricLength();
+////////        // نگاشت s→t //
+////////        double t = sToT(s);                                       // // t متناظر
+////////
+////////        // نقطه و مماس مسیر مرکزی در t //
+////////        Point2D center = parentRoad.curvePoint(t);                // // نقطهٔ مرکزی
+////////        Point2D tan    = parentRoad.curveTangent(t);              // // بردار مماس
+////////
+////////        // نرمالِ چپِ مسیر مرکزی (nx,ny) //
+////////        double lenT = Math.hypot(tan.getX(), tan.getY());         // // طول مماس
+////////        if (lenT < 1e-6) lenT = 1;                                // // جلوگیری از صفر
+////////        double nx = -tan.getY() / lenT;                           // // نرمال x
+////////        double ny =  tan.getX() / lenT;                           // // نرمال y
+////////
+////////        // محاسبهٔ آفست جانبی برای گروه جهت‌ها و جایگاه لِین در گروه //
+////////        int lanesF = parentRoad.getForwardLanes().size();         // // تعداد رفت
+////////        int lanesB = parentRoad.getBackwardLanes().size();        // // تعداد برگشت
+////////        int perSide = Math.max(lanesF, lanesB);                   // // بیشینهٔ هر سمت
+////////        double groupWidth = perSide * UIConstants.LANE_WIDTH
+////////                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنای گروه
+////////        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupWidth * 0.5; // // فاصلهٔ مرکز گروه از مرکز راه
+////////        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // آفست درون‌گروه
+////////
+////////        double lateral = sideSign * sideCenter + (-offsetIndex * perLaneOffset * sideSign); // // آفست کل جانبی
+////////
+////////        int x = (int)Math.round(center.getX() + nx * lateral);   // // X نهایی
+////////        int y = (int)Math.round(center.getY() + ny * lateral);   // // Y نهایی
+////////        return new Point(x, y);                                   // // خروجی
 ////////    }
 ////////
-////////    /** زاویه‌ی لاین نسبت به محور x (برای رندر) */
-////////    public double getAngleRadians() {
-////////        if (parentRoad == null) return 0.0;
-////////        Point a = parentRoad.getStart().getPosition();
-////////        Point b = parentRoad.getEnd().getPosition();
-////////        double dx = b.getX() - a.getX();
-////////        double dy = b.getY() - a.getY();
-////////        double ang = Math.atan2(dy, dx);
-////////        // اگر جهت حرکتی مخالف بردار هندسی است، 180 درجه جابه‌جا
-////////        if (direction == Direction.WEST || direction == Direction.NORTH) ang += Math.PI;
-////////        return ang;
-////////    }
-////////    // آلیاس برای جاهایی که getAngle() صدا می‌زنند
-////////    public double getAngle() { return getAngleRadians(); }
-////////
-////////    /** نقطه‌ی “مرکز لاین” در فاصله‌ی s (۰..طول) با اعمال offset جانبی. */
-////////    public Point getPositionAt(double s) {
-////////        if (parentRoad == null) return new Point(0,0);
-////////        Point a = parentRoad.getStart().getPosition();
-////////        Point b = parentRoad.getEnd().getPosition();
-////////        int dx = b.getX() - a.getX();
-////////        int dy = b.getY() - a.getY();
-////////        double len = Math.sqrt((double)dx*dx + (double)dy*dy);
-////////        if (len <= 1e-9) return new Point(a.getX(), a.getY());
-////////
-////////        double t = Math.max(0.0, Math.min(1.0, s / len));
-////////        double cx = a.getX() + t * dx;
-////////        double cy = a.getY() + t * dy;
-////////
-////////        double nx = -dy / len;
-////////        double ny =  dx / len;
-////////        double off = offsetIndex * LANE_CENTER_OFFSET_PX;
-////////
-////////        int x = (int)Math.round(cx + nx * off);
-////////        int y = (int)Math.round(cy + ny * off);
-////////        return new Point(x, y);
-////////    }
-////////
-////////    // لاین کناری (در صورت نیاز بعداً کامل می‌کنیم)
-////////    public Lane getLeftAdjacentLane()  { return null; }
-////////    public Lane getRightAdjacentLane() { return null; }
-////////}
-////////
-////////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-////////
-////////package infrastructure;
-////////
-////////import java.util.ArrayList;
-////////import java.util.List;
-////////import core.*;
-////////
-/////////**
-//////// * Lane with side-offset rendering helpers and adjacent-lane queries.
-//////// * شامل alias ها برای جلوگیری از ارورهای «cannot find symbol».
-//////// */
-////////public class Lane implements Identifiable {
-////////    private final String id;
-////////    private final Direction direction;
-////////    private final List<core.Vehicle> vehicles = new ArrayList<>();
-////////    private final List<SpeedBump> speedBumps = new ArrayList<>();
-////////    private Road parentRoad;
-////////
-////////    // برای رندر، فاصلهٔ مرکزی هر لاین از محور جاده
-////////    private int offsetIndex = 0;
-////////    private static final int LANE_CENTER_OFFSET_PX = 14;
-////////
-////////    public Lane(String id, Direction direction, Road parentRoad) {
-////////        this.id = id;
-////////        this.direction = direction;
-////////        this.parentRoad = parentRoad;
-////////    }
-////////
-////////    @Override public String getId(){ return id; }
-////////    public Direction getDirection(){ return direction; }
-////////    public Road getParentRoad(){ return parentRoad; }
-////////    public void setParentRoad(Road r){ this.parentRoad = r; }
-////////
-////////    public void setOffsetIndex(int idx){ this.offsetIndex = idx; }
-////////    public int  getOffsetIndex(){ return offsetIndex; }
-////////
-////////    public List<core.Vehicle> getVehicles(){ return vehicles; }
-////////    public void addSpeedBump(SpeedBump sb){ if(sb!=null) speedBumps.add(sb); }
-////////    public List<SpeedBump> getSpeedBumps(){ return speedBumps; }
-////////
-////////    /** طول لاین = طول جادهٔ والد. (سازگار با کدهای قبلی) */
-////////    public double getLength(){
-////////        return (parentRoad == null) ? 0.0 : parentRoad.getGeometricLength();
-////////    }
-////////
-////////    // ---------- Adjacent lanes helpers ----------
-////////    public Lane getLeftAdjacentLane(){
-////////        if(parentRoad == null) return null;
-////////        List<Lane> same = (direction==Direction.EAST || direction==Direction.SOUTH)
-////////                ? parentRoad.getForwardLanes() : parentRoad.getBackwardLanes();
-////////        int target = offsetIndex - ((direction==Direction.EAST || direction==Direction.SOUTH)?1:-1);
-////////        return findByOffset(same, target);
-////////    }
-////////
-////////    public Lane getRightAdjacentLane(){
-////////        if(parentRoad == null) return null;
-////////        List<Lane> same = (direction==Direction.EAST || direction==Direction.SOUTH)
-////////                ? parentRoad.getForwardLanes() : parentRoad.getBackwardLanes();
-////////        int target = offsetIndex + ((direction==Direction.EAST || direction==Direction.SOUTH)?1:-1);
-////////        return findByOffset(same, target);
-////////    }
-////////
-////////    private Lane findByOffset(List<Lane> lanes, int offset){
-////////        if(lanes==null) return null;
-////////        for(Lane ln: lanes){ if(ln!=null && ln.getOffsetIndex()==offset) return ln; }
-////////        return null;
+////////    public double getAngleRadians(){ // // زاویهٔ رندر در موضع فعلی لِین
+////////        // از مشتق مسیر مرکزی استفاده می‌کنیم؛ جهت مخالف ۱۸۰ درجه می‌چرخد.
+////////        Point2D tan = parentRoad.curveTangent(0.5);               // // مماس تقریبی (میان مسیر)
+////////        double angle = Math.atan2(tan.getY(), tan.getX());        // // زاویهٔ A→B
+////////        if (direction==Direction.WEST || direction==Direction.NORTH) angle += Math.PI; // // چرخش برای جهت معکوس
+////////        return angle;                                             // // خروجی
 ////////    }
 ////////}
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
 //////////
-//////////package infrastructure;
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+////////
+//////////9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+//////////package infrastructure; // // پکیج زیرساخت
 //////////
-//////////import java.util.ArrayList;
-//////////import java.util.List;
+//////////import core.Direction;   // // جهت حرکت لِین
+//////////import core.Identifiable; // // برای شناسه
+//////////import core.Point;       // // مختصات جهان
+//////////import ui.UIConstants;   // // ثوابت UI
 //////////
-//////////import core.*;
+//////////public class Lane implements Identifiable { // // مسیر یک‌طرفه روی یک Road
+//////////    private final String id;           // // شناسه یکتا
+//////////    private final Direction direction; // // جهت لِین
+//////////    private final Road parentRoad;     // // جادهٔ والد
 //////////
-///////////**
-////////// * لِین با آفست جانبی نسبت به محور جاده.
-////////// */
-//////////public class Lane implements Identifiable {
-//////////    private final String id;
-//////////    private final Direction direction;
-//////////    private final List<Vehicle> vehicles = new ArrayList<>();
-//////////    private final Road parentRoad;
-//////////    private final List<SpeedBump> speedBumps = new ArrayList<>();
-//////////    private int offsetIndex = 0; // 0 مرکز محور؛ ±1، ±2 ... لِین‌های کنار
+//////////    private Lane leftAdjacentLane;     // // همسایهٔ چپ
+//////////    private Lane rightAdjacentLane;    // // همسایهٔ راست
 //////////
-//////////    private static final int LANE_CENTER_OFFSET_PX = 14;
+//////////    private int offsetIndex = 0;       // // ایندکس درون «گروهِ همان جهت» (-1 چپ، +1 راست)
 //////////
-//////////    public Lane(String id, Direction direction, Road parentRoad) {
-//////////        this.id = id;
-//////////        this.direction = direction;
-//////////        this.parentRoad = parentRoad;
+//////////    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
+//////////        this.id = id;                 // // ست ID
+//////////        this.direction = direction;   // // ست جهت
+//////////        this.parentRoad = parentRoad; // // ست جاده
 //////////    }
 //////////
-//////////    @Override public String getId() { return id; }
-//////////    public Direction getDirection() { return direction; }
-//////////    public Road getParentRoad() { return parentRoad; }
-//////////
-//////////    public List<Vehicle> getVehicles() { return vehicles; }
-//////////
-//////////    public void addSpeedBump(SpeedBump sb) { if (sb != null) speedBumps.add(sb); }
-//////////    public List<SpeedBump> getSpeedBumps() { return speedBumps; }
-//////////
-//////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; }
-//////////    public int getOffsetIndex() { return offsetIndex; }
-//////////
-//////////    /** طول لِین = طول هندسی جاده‌ی والد. */
-//////////    public double getLength() {
-//////////        return parentRoad != null ? parentRoad.getGeometricLength() : 0.0;
+//////////    @Override
+//////////    public String getId() { // // گتر ID
+//////////        return id;
 //////////    }
 //////////
-//////////    /** زاویه‌ی رندر بر حسب رادیان. */
-//////////    public double getAngleRadians() {
-//////////        if (parentRoad == null) return 0.0;
-//////////        Point a = parentRoad.getStartIntersection().getPosition();
-//////////        Point b = parentRoad.getEndIntersection().getPosition();
-//////////        double dx = (double)(b.getX() - a.getX());
-//////////        double dy = (double)(b.getY() - a.getY());
-//////////        double ang = Math.atan2(dy, dx);
-//////////        if (direction == Direction.WEST || direction == Direction.NORTH) ang += Math.PI;
-//////////        return ang;
+//////////    public Direction getDirection() { // // گتر جهت
+//////////        return direction;
 //////////    }
 //////////
-//////////    /** نقطه‌ی روی لِین با درنظر گرفتن آفست جانبی. s به پیکسل. */
-//////////    public Point getPositionAt(double s) {
-//////////        if (parentRoad == null) return new Point(0, 0);
-//////////        Point a = parentRoad.getStartIntersection().getPosition();
-//////////        Point b = parentRoad.getEndIntersection().getPosition();
-//////////
-//////////        int dx = b.getX() - a.getX();
-//////////        int dy = b.getY() - a.getY();
-//////////        double len = Math.sqrt((double)dx * dx + (double)dy * dy);
-//////////        if (len <= 1e-9) return new Point(a.getX(), a.getY());
-//////////
-//////////        double t = s / len;
-//////////        if (t < 0.0) t = 0.0;
-//////////        if (t > 1.0) t = 1.0;
-//////////
-//////////        double cx = a.getX() + t * dx;
-//////////        double cy = a.getY() + t * dy;
-//////////
-//////////        // نرمال واحد برای آفست جانبی
-//////////        double nx = -dy / len;
-//////////        double ny =  dx / len;
-//////////        double off = this.offsetIndex * LANE_CENTER_OFFSET_PX;
-//////////
-//////////        int x = (int)Math.round(cx + nx * off);
-//////////        int y = (int)Math.round(cy + ny * off);
-//////////        return new Point(x, y);
+//////////    public Road getParentRoad() { // // گتر جادهٔ والد
+//////////        return parentRoad;
 //////////    }
 //////////
-//////////    // ========= لِین‌های چپ/راست نسبت به جهت حرکت =========
+//////////    public Lane getLeftAdjacentLane() { return leftAdjacentLane; }   // // همسایهٔ چپ
+//////////    public Lane getRightAdjacentLane(){ return rightAdjacentLane; }  // // همسایهٔ راست
+//////////    public void setLeftAdjacentLane(Lane l) { this.leftAdjacentLane = l; }   // // ست چپ
+//////////    public void setRightAdjacentLane(Lane l){ this.rightAdjacentLane = l; }  // // ست راست
+//////////    public void setOffsetIndex(int index){ this.offsetIndex = index; }       // // ست ایندکس
 //////////
-//////////    public Lane getLeftAdjacentLane() {
-//////////        if (parentRoad == null) return null;
-//////////        int target = (direction == Direction.EAST || direction == Direction.SOUTH)
-//////////                ? offsetIndex - 1 : offsetIndex + 1;
-//////////        List<Lane> same = (direction == Direction.EAST || direction == Direction.SOUTH)
-//////////                ? parentRoad.getForwardLanes() : parentRoad.getBackwardLanes();
-//////////        return findByOffset(same, target);
+//////////    // --------------------- هندسه: طول/مکان/زاویه ---------------------
+//////////
+//////////    public double getLength() { // // طول لِین
+//////////        Point A = parentRoad.getStartIntersection().getPosition(); // // نقطهٔ شروع
+//////////        Point B = parentRoad.getEndIntersection().getPosition();   // // نقطهٔ پایان
+//////////        double dx = B.getX() - A.getX(); // // Δx
+//////////        double dy = B.getY() - A.getY(); // // Δy
+//////////        return Math.sqrt(dx*dx + dy*dy); // // طول
 //////////    }
 //////////
-//////////    public Lane getRightAdjacentLane() {
-//////////        if (parentRoad == null) return null;
-//////////        int target = (direction == Direction.EAST || direction == Direction.SOUTH)
-//////////                ? offsetIndex + 1 : offsetIndex - 1;
-//////////        List<Lane> same = (direction == Direction.EAST || direction == Direction.SOUTH)
-//////////                ? parentRoad.getForwardLanes() : parentRoad.getBackwardLanes();
-//////////        return findByOffset(same, target);
+//////////    public Point getPositionAt(double positionInLane) {
+//////////        // // مختصات «مرکز خودرو» روی این لِین با احتساب جداسازی جهت‌ها و چندلاینه
+//////////
+//////////        Point A = parentRoad.getStartIntersection().getPosition(); // // A
+//////////        Point B = parentRoad.getEndIntersection().getPosition();   // // B
+//////////        double dx = B.getX() - A.getX(); // // Δx
+//////////        double dy = B.getY() - A.getY(); // // Δy
+//////////        double len = Math.sqrt(dx*dx + dy*dy); // // طول
+//////////
+//////////        if (len < 1e-6) return new Point(A.getX(), A.getY()); // // محافظت از تقسیم بر صفر
+//////////
+//////////        // واحد جهت مسیرِ Road (A→B) //
+//////////        double ux = dx / len; // // بردار واحد طولی x
+//////////        double uy = dy / len; // // بردار واحد طولی y
+//////////
+//////////        // بردار عمودِ «چپِ A→B» (برای جابه‌جایی جانبی) //
+//////////        double nx = -uy; // // نرمال x
+//////////        double ny =  ux; // // نرمال y
+//////////
+//////////        // نسبت پیشروی روی راه (0..1) //
+//////////        double t = positionInLane / len; // // t
+//////////        // برای پایداری، کلیپ //
+//////////        if (t < 0) t = 0; if (t > 1) t = 1; // // کلیپ
+//////////
+//////////        // نقطهٔ مرکزی روی خطِ مرکزی راه //
+//////////        double cx = A.getX() + ux * (t * len); // // X مرکزی
+//////////        double cy = A.getY() + uy * (t * len); // // Y مرکزی
+//////////
+//////////        // --- محاسبهٔ عرض بصری راه بر اساس تعداد لِین‌ها ---
+//////////        int lanesF = parentRoad.getForwardLanes().size(); // // تعداد لِین‌های جهت رفت
+//////////        int lanesB = parentRoad.getBackwardLanes().size();// // تعداد لِین‌های جهت برگشت
+//////////        int perSide = Math.max(lanesF, lanesB);           // // حداکثر لِین در هر سمت
+//////////
+//////////        // پهنای گروه یک سمت (فقط همان جهت) //
+//////////        double groupWidth = perSide * UIConstants.LANE_WIDTH
+//////////                + Math.max(0, perSide - 1) * UIConstants.LANE_GAP; // // پهنا گروه
+//////////
+//////////        // فاصلهٔ مرکز هر گروه از خط وسط راه (نیمِ شکاف وسط + نیمِ پهنای گروه) //
+//////////        double sideCenter = UIConstants.LANE_GAP * 0.5 + groupWidth * 0.5; // // مرکز گروه
+//////////
+//////////        // جابه‌جایی درون گروه برای این لِین (نصف پهنای یک لِین + نصف فاصلهٔ بین‌لاین) //
+//////////        double perLaneOffset = (UIConstants.LANE_WIDTH * 0.5) + (UIConstants.LANE_GAP * 0.5); // // آفست درون‌گروه
+//////////
+//////////        // علامت سمت: +1 برای جهت «رو به جلو» (E/S) ، -1 برای جهت «برگشتی» (W/N) //
+//////////        int sideSign = (direction == Direction.EAST || direction == Direction.SOUTH) ? (+1) : (-1); // // علامت سمت
+//////////
+//////////        // آفست کل جانبی: مرکزِ گروه ± آفست درون‌گروه با توجه به چپ/راستِ همان جهت //
+//////////        double lateral = sideSign * sideCenter                             // // انتقال گروه از مرکز راه
+//////////                + (-offsetIndex * perLaneOffset * sideSign);        // // جابه‌جایی درون گروه (چپ/راست)
+//////////
+//////////        // مختصات نهایی با انتقال روی نرمال //
+//////////        int x = (int)Math.round(cx + nx * lateral); // // X نهایی
+//////////        int y = (int)Math.round(cy + ny * lateral); // // Y نهایی
+//////////        return new Point(x, y); // // خروجی
 //////////    }
 //////////
-//////////    private Lane findByOffset(List<Lane> lanes, int offset) {
-//////////        if (lanes == null) return null;
-//////////        for (Lane ln : lanes) {
-//////////            if (ln != null && ln.getOffsetIndex() == offset) return ln;
-//////////        }
-//////////        return null;
+//////////    public double getAngleRadians() { // // زاویهٔ A→B برای رندر
+//////////        Point A = parentRoad.getStartIntersection().getPosition(); // // A
+//////////        Point B = parentRoad.getEndIntersection().getPosition();   // // B
+//////////        double dx = B.getX() - A.getX(); // // Δx
+//////////        double dy = B.getY() - A.getY(); // // Δy
+//////////        return Math.atan2(dy, dx); // // زاویه
 //////////    }
 //////////}
 //////////
@@ -1150,522 +947,130 @@ public class Lane implements Identifiable { // // لاین یک‌طرفه
 //////////
 //////////
 //////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-////////////package infrastructure;
+////////////777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
 ////////////
-////////////import java.util.ArrayList;
-////////////import java.util.List;
-////////////
-////////////import core.Direction;
-////////////import core.Identifiable;
-////////////import core.Point;
-////////////import core.Vehicle;
-////////////
-////////////public class Lane implements Identifiable {
-////////////
-////////////    // ---------------- fields ----------------
-////////////    private final String id;
-////////////    private final Direction direction;
-////////////    private final List<Vehicle> vehicles = new ArrayList<>();
-////////////    private Road parentRoad;
-////////////
-////////////    private final List<SpeedBump> speedBumps = new ArrayList<>();
-////////////
-////////////    /** اندیس آفست جانبی نسبت به خط میانی جاده: 0، ±1، ±2، ... */
-////////////    private int offsetIndex = 0;
-////////////
-////////////    /** فاصله‌ی مرکز هر لاین از خط میانی (پیکسل رندر) */
-////////////    private static final int LANE_CENTER_OFFSET_PX = 14;
-////////////
-////////////    // ---------------- ctor ----------------
-////////////    public Lane(String id, Direction direction, Road parent) {
-////////////        this.id = id;
-////////////        this.direction = direction;
-////////////        this.parentRoad = parent;
-////////////    }
-////////////
-////////////    // ---------------- identity ----------------
-////////////    @Override public String getId() { return id; }
-////////////
-////////////    // ---------------- basic getters/setters ----------------
-////////////    public Direction getDirection() { return direction; }
-////////////
-////////////    public Road getParentRoad() { return parentRoad; }
-////////////    public void setParentRoad(Road parent) { this.parentRoad = parent; }
-////////////
-////////////    public List<Vehicle> getVehicles() { return vehicles; }
-////////////
-////////////    public void addSpeedBump(SpeedBump sb) { if (sb != null) speedBumps.add(sb); }
-////////////    public List<SpeedBump> getSpeedBumps() { return speedBumps; }
-////////////
-////////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; }
-////////////    public int getOffsetIndex() { return offsetIndex; }
-////////////
-////////////    // ---------------- geometry helpers ----------------
-////////////    /** طول لاین (متر) — معادل طول جاده‌ی والد. */
-////////////    public double getLength() {
-////////////        if (parentRoad == null) return 0.0;
-////////////        // دقت کن: این باید با امضای واقعی Road هم‌خوان باشد.
-////////////        // اگر در Road متد دیگری داری، همین‌جا جایگزینش کن.
-////////////        return parentRoad.getLengthMeters();
-////////////    }
-////////////
-////////////    /** زاویه‌ی حرکت (رادیان) برای رندر نسبی به جهت حرکت. */
-////////////    public double getAngleRadians() {
-////////////        if (parentRoad == null) return 0.0;
-////////////        Point a = parentRoad.getStartIntersection().getPosition();
-////////////        Point b = parentRoad.getEndIntersection().getPosition();
-////////////        double dx = b.getX() - a.getX();
-////////////        double dy = b.getY() - a.getY();
-////////////        double ang = Math.atan2(dy, dx);
-////////////        // اگر لاین به سمت غرب/شمال حرکت می‌کند، بردار را برعکس کن
-////////////        if (direction == Direction.WEST || direction == Direction.NORTH) {
-////////////            ang += Math.PI;
-////////////        }
-////////////        return ang;
-////////////    }
-////////////
-////////////    /**
-////////////     * مختصات نقطه‌ای روی لاین برای فاصله‌ی s (پیکسل روی نقشه‌ی رندر)
-////////////     * با اعمال آفست جانبی لاین نسبت به خط میانی جاده.
-////////////     */
-////////////    public Point getPositionAt(double s) {
-////////////        if (parentRoad == null) return new Point(0, 0);
-////////////        Point a = parentRoad.getStartIntersection().getPosition();
-////////////        Point b = parentRoad.getEndIntersection().getPosition();
-////////////
-////////////        int dx = b.getX() - a.getX();
-////////////        int dy = b.getY() - a.getY();
-////////////        double len = Math.sqrt((double) dx * dx + (double) dy * dy);
-////////////        if (len <= 1e-9) return new Point(a.getX(), a.getY());
-////////////
-////////////        // نسبت 0..1 روی پاره‌خط
-////////////        double t = s / len;
-////////////        if (t < 0) t = 0;
-////////////        if (t > 1) t = 1;
-////////////
-////////////        double cx = a.getX() + t * dx;
-////////////        double cy = a.getY() + t * dy;
-////////////
-////////////        // نرمال واحد (عمود بر بردار جاده) برای آفست جانبی لاین
-////////////        double nx = -dy / len;
-////////////        double ny =  dx / len;
-////////////        double off = offsetIndex * LANE_CENTER_OFFSET_PX;
-////////////
-////////////        int x = (int) Math.round(cx + nx * off);
-////////////        int y = (int) Math.round(cy + ny * off);
-////////////        return new Point(x, y);
-////////////    }
-////////////
-////////////    // ---------------- adjacent lanes (for lane change / overtake) ----------------
-////////////    public Lane getLeftAdjacentLane() {
-////////////        if (parentRoad == null) return null;
-////////////
-////////////        // برای EAST/SOUTH: چپ یعنی آفست کوچک‌تر (منفی‌تر)
-////////////        // برای WEST/NORTH: چپ یعنی آفست بزرگ‌تر (مثبت‌تر)
-////////////        if (direction == Direction.EAST || direction == Direction.SOUTH) {
-////////////            return findByOffset(parentRoad.getForwardLanes(), offsetIndex - 1);
-////////////        } else {
-////////////            return findByOffset(parentRoad.getBackwardLanes(), offsetIndex + 1);
-////////////        }
-////////////    }
-////////////
-////////////    public Lane getRightAdjacentLane() {
-////////////        if (parentRoad == null) return null;
-////////////
-////////////        if (direction == Direction.EAST || direction == Direction.SOUTH) {
-////////////            return findByOffset(parentRoad.getForwardLanes(), offsetIndex + 1);
-////////////        } else {
-////////////            return findByOffset(parentRoad.getBackwardLanes(), offsetIndex - 1);
-////////////        }
-////////////    }
-////////////
-////////////    private Lane findByOffset(List<Lane> lanes, int targetOffset) {
-////////////        if (lanes == null) return null;
-////////////        for (int i = 0; i < lanes.size(); i++) {
-////////////            Lane ln = lanes.get(i);
-////////////            if (ln != null && ln.getOffsetIndex() == targetOffset) return ln;
-////////////        }
-////////////        return null;
-////////////    }
-////////////}
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-////////////
-////////////// در infrastructure/Lane.java
-////////////package infrastructure;
-////////////
-////////////import core.Direction;
-////////////import core.Point;
-////////////import java.util.*;
-////////////
-////////////public class Lane implements core.Identifiable {
-////////////    private final String id;
-////////////    private final Direction direction;
-////////////    private final Road parentRoad;
-////////////    private final List<core.Vehicle> vehicles = new ArrayList<>();
-////////////
-////////////    // افست عرضی لِین نسبت به خط مرکزی جاده: -2, -1, 0, +1, +2 ...
-////////////    private int offsetIndex = 0;
-////////////
-////////////    // برای رندر و محاسبه موقعیت خودرو روی لِین (با عرض لِین و گپ)
-////////////    public static final int LANE_WIDTH = ui.UIConstants.LANE_WIDTH;
-////////////    public static final int LANE_GAP   = 2;
-////////////
-////////////    // طول هندسی لِین (طول جاده)
-////////////    public double getLength() { return parentRoad.getGeometricLength(); }
-////////////
-////////////    public Lane(String id, Direction dir, Road parent) {
-////////////        this.id = id; this.direction = dir; this.parentRoad = parent;
-////////////    }
-////////////    public String getId() { return id; }
-////////////    public Direction getDirection() { return direction; }
-////////////    public Road getParentRoad() { return parentRoad; }
-////////////
-////////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; }
-////////////    public int  getOffsetIndex() { return offsetIndex; }
-////////////
-////////////    /** مرکز لِین در فاصله s (۰..طول) بر حسب مختصات نقشه */
-////////////    public Point getCenterAt(double s) {
-////////////        Point A = parentRoad.getStartIntersection().getPosition();
-////////////        Point B = parentRoad.getEndIntersection().getPosition();
-////////////        double L = Math.max(1.0, getLength());
-////////////        double t = Math.max(0, Math.min(1, s / L));
-////////////
-////////////        double cx = A.getX() + (B.getX() - A.getX()) * t;
-////////////        double cy = A.getY() + (B.getY() - A.getY()) * t;
-////////////
-////////////        // بردار عمود واحد برای جابجایی عرضی لِین
-////////////        double dx = B.getX() - A.getX(), dy = B.getY() - A.getY();
-////////////        double nlen = Math.hypot(dx, dy); if (nlen < 1e-6) nlen = 1;
-////////////        double nx = -dy / nlen, ny = dx / nlen;
-////////////
-////////////        double off = offsetIndex * (LANE_WIDTH + LANE_GAP);
-////////////        int x = (int) Math.round(cx + nx * off);
-////////////        int y = (int) Math.round(cy + ny * off);
-////////////        return new Point(x, y);
-////////////    }
-////////////
-////////////    // همسایه‌ها برای سبقت/تغییر لِین (اگر داری نگه دار، وگرنه placeholder)
-////////////    public Lane getLeftAdjacentLane()  { return parentRoad.getAdjacent(this, -1); }
-////////////    public Lane getRightAdjacentLane() { return parentRoad.getAdjacent(this, +1); }
-////////////}
-////////////
-////////////
-////////////
-////////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
 ////////////package infrastructure; // // پکیج زیرساخت
 ////////////
-////////////import java.util.ArrayList; // // لیست
-////////////import java.util.List; // // اینترفیس لیست
-////////////import core.Identifiable; // // اینترفیس شناسه
-////////////import core.Direction; // // جهت
-////////////import core.Vehicle; // // خودرو
-////////////import core.Point; // // مختصات
+////////////import core.Direction;   // // جهت حرکت لاین (N/E/S/W)
+////////////import core.Identifiable; // // برای داشتن شناسه یکتا
+////////////import core.Point;       // // نوع نقطه (مختصات جهان) — توجه: این core.Point است، نه java.awt.Point
 ////////////
-////////////public class Lane implements Identifiable { // // کلاس لِین
-////////////    private String id; // // شناسه یکتا
-////////////    private Direction direction; // // جهت حرکت
-////////////    private List<Vehicle> vehicles; // // وسایل داخل لِین
-////////////    private Road parentRoad; // // جادهٔ والد
-////////////    private List<SpeedBump> speedBumps; // // دست‌اندازها
-////////////    private int offsetIndex = 0; // // شاخص آفست جانبی (±۱، ±۲، ...)
+////////////public class Lane implements Identifiable { // // مسیر یک‌طرفه درون یک Road
+////////////    private final String id;           // // شناسه یکتا برای لاین
+////////////    private final Direction direction; // // جهت حرکت این لاین
+////////////    private final Road parentRoad;     // // جادهٔ والد که این لاین روی آن قرار دارد
 ////////////
-////////////    private static final int LANE_CENTER_OFFSET_PX = 14; // // فاصلهٔ مرکز هر لِین از خط مرکزی
+////////////    private Lane leftAdjacentLane;     // // لاین کناری در سمت چپ (اگر وجود داشته باشد)
+////////////    private Lane rightAdjacentLane;    // // لاین کناری در سمت راست (اگر وجود داشته باشد)
 ////////////
-////////////    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
-////////////        this.id = id; // // id
-////////////        this.direction = direction; // // جهت
-////////////        this.vehicles = new ArrayList<Vehicle>(); // // ساخت لیست
-////////////        this.parentRoad = parentRoad; // // والد
-////////////        this.speedBumps = new ArrayList<SpeedBump>(); // // دست‌انداز
+////////////    // --- آفست جانبی برای جدا کردن مسیر هندسی هر لاین از خط مرکزی راه ---
+////////////    // مقدار -1 یعنی کمی به چپ مسیر اصلی، +1 یعنی کمی به راست مسیر اصلی (نسبت به جهت همین لاین)
+////////////    private int offsetIndex = 0;       // // پیش‌فرض 0 (روی خط مرکزی راه)
+////////////
+////////////    public Lane(String id, Direction direction, Road parentRoad) { // // سازندهٔ لاین
+////////////        this.id = id;                 // // ذخیره شناسه
+////////////        this.direction = direction;   // // ذخیره جهت
+////////////        this.parentRoad = parentRoad; // // ذخیره جاده والد
+////////////        this.leftAdjacentLane = null; // // در ابتدا همسایه ندارد
+////////////        this.rightAdjacentLane = null;// // در ابتدا همسایه ندارد
 ////////////    }
 ////////////
-////////////    @Override public String getId() { return this.id; } // // گتر id
-////////////    public Direction getDirection() { return this.direction; } // // گتر جهت
-////////////    public Road getParentRoad() { return this.parentRoad; } // // گتر والد
-////////////    public void setParentRoad(Road road) { this.parentRoad = road; } // // ست والد
-////////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; } // // ست آفست
-////////////    public int getOffsetIndex() { return this.offsetIndex; } // // گتر آفست
-////////////
-////////////    public List<Vehicle> getVehicles() { return this.vehicles; } // // لیست وسایل
-////////////    public void addSpeedBump(SpeedBump sb) { if (sb != null) { this.speedBumps.add(sb); } } // // افزودن دست‌انداز
-////////////    public List<SpeedBump> getSpeedBumps() { return this.speedBumps; } // // گتر دست‌انداز
-////////////
-////////////    public double getLength() { // // طول لِین = طول جاده
-////////////        if (this.parentRoad == null) { return 0.0; } // // نال‌چک
-////////////        return this.parentRoad.getLengthMeters(); // // استفاده از طول جاده
+////////////    @Override
+////////////    public String getId() { // // گتر شناسه
+////////////        return id; // // برگرداندن ID
 ////////////    }
 ////////////
-////////////    public double getAngleRadians() { // // زاویهٔ رندر
-////////////        if (this.parentRoad == null) { return 0.0; } // // بدون والد
-////////////        Point a = this.parentRoad.getStartIntersection().getPosition(); // // A
-////////////        Point b = this.parentRoad.getEndIntersection().getPosition(); // // B
-////////////        double dx = (double)(b.getX() - a.getX()); // // Δx
-////////////        double dy = (double)(b.getY() - a.getY()); // // Δy
-////////////        double ang = Math.atan2(dy, dx); // // زاویه محور جاده
-////////////        if (this.direction == Direction.WEST || this.direction == Direction.NORTH) { ang += Math.PI; } // // معکوس جهت
-////////////        return ang; // // خروجی
+////////////    public Direction getDirection() { // // گتر جهت
+////////////        return direction; // // برگرداندن جهت
 ////////////    }
 ////////////
-////////////    public Point getPositionAt(double s) { // // نقطه روی لِین (با آفست جانبی)
-////////////        if (this.parentRoad == null) { return new Point(0, 0); } // // نال‌چک
-////////////        Point a = this.parentRoad.getStartIntersection().getPosition(); // // A
-////////////        Point b = this.parentRoad.getEndIntersection().getPosition(); // // B
-////////////
-////////////        int dx = b.getX() - a.getX(); // // Δx
-////////////        int dy = b.getY() - a.getY(); // // Δy
-////////////        double len = Math.sqrt((double)dx * dx + (double)dy * dy); // // طول
-////////////        if (len <= 1e-9) { return new Point(a.getX(), a.getY()); } // // محافظه‌کاری
-////////////
-////////////        double t = s / len; if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0; // // نسبت ۰..۱ و کلمپ
-////////////        double cx = a.getX() + t * dx; // // X مرکزی
-////////////        double cy = a.getY() + t * dy; // // Y مرکزی
-////////////
-////////////        // نرمال واحد برای آفست جانبی
-////////////        double nx = -dy / len; // // نرمال X
-////////////        double ny =  dx / len; // // نرمال Y
-////////////        double off = this.offsetIndex * LANE_CENTER_OFFSET_PX; // // مقدار آفست
-////////////
-////////////        int x = (int)Math.round(cx + nx * off); // // X نهایی
-////////////        int y = (int)Math.round(cy + ny * off); // // Y نهایی
-////////////        return new Point(x, y); // // خروجی
+////////////    public Road getParentRoad() { // // گتر جادهٔ والد
+////////////        return parentRoad; // // برگرداندن Road
 ////////////    }
 ////////////
-////////////    // ================== لِین‌های کناری برای سبقت/تغییر لِین ==================
+////////////    // --------------------- همسایه‌های کناری (برای تغییر لاین/سبقت) ---------------------
 ////////////
-////////////    public Lane getLeftAdjacentLane() { // // لِین سمت چپ نسبت به جهت حرکت
-////////////        if (this.parentRoad == null) { return null; } // // نال‌چک
-////////////        // جهت چپ: برای EAST/SOUTH یعنی offsetIndex - 1 ، برای WEST/NORTH یعنی +1
-////////////        int targetOffset = this.offsetIndex; // // شروع از فعلی
-////////////        if (this.direction == Direction.EAST || this.direction == Direction.SOUTH) { // // رو به جلو
-////////////            targetOffset = this.offsetIndex - 1; // // چپ = آفست منفی‌تر
-////////////            List<Lane> same = this.parentRoad.getForwardLanes(); // // لِین‌های هم‌جهت
-////////////            return findByOffset(same, targetOffset); // // جست‌وجو
-////////////        } else { // // WEST/NORTH (برگشت)
-////////////            targetOffset = this.offsetIndex + 1; // // چپ = آفست مثبت‌تر
-////////////            List<Lane> same = this.parentRoad.getBackwardLanes(); // // لِین‌های هم‌جهت
-////////////            return findByOffset(same, targetOffset); // // جست‌وجو
+////////////    public Lane getLeftAdjacentLane() { // // لاین سمت چپ
+////////////        return leftAdjacentLane; // // ممکن است null باشد
+////////////    }
+////////////
+////////////    public Lane getRightAdjacentLane() { // // لاین سمت راست
+////////////        return rightAdjacentLane; // // ممکن است null باشد
+////////////    }
+////////////
+////////////    public void setLeftAdjacentLane(Lane lane) { // // ست کردن همسایهٔ چپ
+////////////        this.leftAdjacentLane = lane; // // ذخیرهٔ ارجاع
+////////////    }
+////////////
+////////////    public void setRightAdjacentLane(Lane lane) { // // ست کردن همسایهٔ راست
+////////////        this.rightAdjacentLane = lane; // // ذخیرهٔ ارجاع
+////////////    }
+////////////
+////////////    // --------------------- آفست جانبی (برای عریض کردن بصری خیابان) ---------------------
+////////////
+////////////    public void setOffsetIndex(int index) { // // تعیین ایندکس آفست جانبی این لاین
+////////////        this.offsetIndex = index; // // -1 = چپ، +1 = راست (نسبت به جهت همین لاین)
+////////////    }
+////////////
+////////////    // --------------------- هندسهٔ لاین: طول، موقعیت، زاویه ---------------------
+////////////
+////////////    public double getLength() { // // طول هندسی لاین (فاصلهٔ دو تقاطع Road)
+////////////        Point A = parentRoad.getStartIntersection().getPosition(); // // مختصات تقاطع شروع
+////////////        Point B = parentRoad.getEndIntersection().getPosition();   // // مختصات تقاطع پایان
+////////////        double dx = B.getX() - A.getX(); // // اختلاف X
+////////////        double dy = B.getY() - A.getY(); // // اختلاف Y
+////////////        return Math.sqrt(dx * dx + dy * dy); // // طول با قضیهٔ فیثاغورس
+////////////    }
+////////////
+////////////    public Point getPositionAt(double positionInLane) {
+////////////        // // خروجی: «مختصات جهان» نقطه‌ای روی این لاین، با احتساب «آفست جانبی»
+////////////        // // ورودی positionInLane فاصلهٔ طی‌شده از ابتدای لاین است (0..طول لاین)
+////////////
+////////////        Point A = parentRoad.getStartIntersection().getPosition(); // // نقطهٔ شروع راه
+////////////        Point B = parentRoad.getEndIntersection().getPosition();   // // نقطهٔ پایان راه
+////////////
+////////////        double dx = B.getX() - A.getX(); // // مؤلفهٔ X بردار راه
+////////////        double dy = B.getY() - A.getY(); // // مؤلفهٔ Y بردار راه
+////////////        double len = Math.sqrt(dx * dx + dy * dy); // // طول راه
+////////////
+////////////        if (len <= 0.0001) { // // اگر طول تقریباً صفر بود (ایراد داده)
+////////////            return new Point(A.getX(), A.getY()); // // همان نقطهٔ شروع را برگردان
 ////////////        }
+////////////
+////////////        // t = نسبت پیشروی روی خط مرکزی راه (0..1) //
+////////////        double t = positionInLane / len; // // تبدیل فاصله به نسبت
+////////////        if (t < 0) t = 0; // // کلیپ پایین
+////////////        if (t > 1) t = 1; // // کلیپ بالا
+////////////
+////////////        // مختصات نقطهٔ روی خط مرکزی (بدون آفست جانبی) //
+////////////        double cx = A.getX() + dx * t; // // X مرکزی
+////////////        double cy = A.getY() + dy * t; // // Y مرکزی
+////////////
+////////////        // بردار عمود واحد روی مسیر: برای (dx,dy)، عمود = (-dy, +dx) / len //
+////////////        double nx = -dy / len; // // X عمود واحد
+////////////        double ny =  dx / len; // // Y عمود واحد
+////////////
+////////////        // فاصلهٔ جانبی هر لاین نسبت به خط مرکزی:
+////////////        // perLaneOffset = نصف پهنای یک لاین + نصف فاصلهٔ میان لاین‌ها
+////////////        double halfLane = ui.UIConstants.LANE_WIDTH * 0.5; // // نصف پهنای یک لاین (از UIConstants)
+////////////        double halfGap  = ui.UIConstants.LANE_GAP  * 0.5;  // // نصف فاصلهٔ بین لاین‌ها
+////////////        double perLaneOffset = halfLane + halfGap; // // مجموع آفست جانبی برای هر لاین از مرکز
+////////////
+////////////        // آفست نهایی این لاین (بر حسب ایندکس سمت چپ/راست)
+////////////        double lateral = offsetIndex * perLaneOffset; // // -1=چپ، +1=راست
+////////////
+////////////        // انتقال نقطهٔ مرکزی به سمت عمود (چپ/راست) //
+////////////        int x = (int) Math.round(cx + nx * lateral); // // X نهایی
+////////////        int y = (int) Math.round(cy + ny * lateral); // // Y نهایی
+////////////
+////////////        return new Point(x, y); // // مختصات جهانِ نهاییِ این لاین
 ////////////    }
 ////////////
-////////////    public Lane getRightAdjacentLane() { // // لِین سمت راست نسبت به جهت حرکت
-////////////        if (this.parentRoad == null) { return null; } // // نال‌چک
-////////////        // جهت راست: برای EAST/SOUTH یعنی offsetIndex + 1 ، برای WEST/NORTH یعنی -1
-////////////        int targetOffset = this.offsetIndex; // // شروع از فعلی
-////////////        if (this.direction == Direction.EAST || this.direction == Direction.SOUTH) { // // رو به جلو
-////////////            targetOffset = this.offsetIndex + 1; // // راست = آفست مثبت‌تر
-////////////            List<Lane> same = this.parentRoad.getForwardLanes(); // // لِین‌های هم‌جهت
-////////////            return findByOffset(same, targetOffset); // // جست‌وجو
-////////////        } else { // // WEST/NORTH
-////////////            targetOffset = this.offsetIndex - 1; // // راست = آفست منفی‌تر
-////////////            List<Lane> same = this.parentRoad.getBackwardLanes(); // // لِین‌های هم‌جهت
-////////////            return findByOffset(same, targetOffset); // // جست‌وجو
-////////////        }
-////////////    }
-////////////
-////////////    private Lane findByOffset(List<Lane> lanes, int offset) { // // کمک: پیدا کردن لِین با آفست مشخص
-////////////        if (lanes == null) { return null; } // // نال‌چک
-////////////        for (int i = 0; i < lanes.size(); i++) { // // حلقه
-////////////            Lane ln = lanes.get(i); // // کاندید
-////////////            if (ln != null && ln.getOffsetIndex() == offset) { return ln; } // // تطابق آفست
-////////////        }
-////////////        return null; // // پیدا نشد
-////////////    }
-////////////}
-////////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-////////////package infrastructure; // // پکیج زیرساخت
-////////////
-////////////import java.util.ArrayList; // // لیست
-////////////import java.util.List; // // اینترفیس لیست
-////////////import core.Identifiable; // // اینترفیس شناسه
-////////////import core.Direction; // // جهت
-////////////import core.Vehicle; // // خودرو
-////////////import core.Point; // // مختصات
-////////////
-////////////public class Lane implements Identifiable { // // کلاس لِین
-////////////    private String id; // // شناسه یکتا
-////////////    private Direction direction; // // جهت حرکت
-////////////    private List<Vehicle> vehicles; // // وسایل داخل لِین
-////////////    private Road parentRoad; // // جادهٔ والد
-////////////    private List<SpeedBump> speedBumps; // // دست‌اندازها
-////////////    private int offsetIndex = 0; // // شاخص آفست جانبی (علامت سمت، قدرمطلق شمارهٔ لِین از مرکز)
-////////////    // نکته: offsetIndex > 0 یعنی سمت «مثبت» خط مرکزی، offsetIndex < 0 سمت «منفی»
-////////////    // هر واحد offsetIndex یک فاصلهٔ ثابت از مرکز جاده است.
-////////////
-////////////    // فاصلهٔ جانبی هر «واحد لِین» نسبت به مرکز (px) — باید بزرگ‌تر از نیم‌عرض خودرو باشد
-////////////    private static final int LANE_CENTER_OFFSET_PX = 14; // // ۱۴px → از هم جدا دیده شوند
-////////////
-////////////    public Lane(String id, Direction direction, Road parentRoad) { // // سازنده
-////////////        this.id = id; // // مقداردهی id
-////////////        this.direction = direction; // // مقداردهی جهت
-////////////        this.vehicles = new ArrayList<Vehicle>(); // // ساخت لیست وسایل
-////////////        this.parentRoad = parentRoad; // // ست والد
-////////////        this.speedBumps = new ArrayList<SpeedBump>(); // // ساخت لیست دست‌انداز
-////////////    }
-////////////
-////////////    @Override public String getId() { return this.id; } // // گتر id
-////////////    public Direction getDirection() { return this.direction; } // // گتر جهت
-////////////    public Road getParentRoad() { return this.parentRoad; } // // گتر جاده والد
-////////////    public void setParentRoad(Road road) { this.parentRoad = road; } // // ست جاده والد
-////////////
-////////////    public void setOffsetIndex(int idx) { this.offsetIndex = idx; } // // تعیین آفست جانبی
-////////////    public int getOffsetIndex() { return this.offsetIndex; } // // خواندن آفست جانبی
-////////////
-////////////    public List<Vehicle> getVehicles() { return this.vehicles; } // // گتر وسایل
-////////////    public void addSpeedBump(SpeedBump sb) { if (sb != null) { this.speedBumps.add(sb); } } // // افزودن دست‌انداز
-////////////    public List<SpeedBump> getSpeedBumps() { return this.speedBumps; } // // گتر دست‌انداز
-////////////
-////////////    public double getLength() { // // طول لِین = طول جاده
-////////////        if (this.parentRoad == null) { return 0.0; } // // نال‌چک
-////////////        return this.parentRoad.getLengthMeters(); // // استفاده از طول جاده
-////////////    }
-////////////
-////////////    public double getAngleRadians() { // // زاویهٔ محور جاده برای رندر
-////////////        if (this.parentRoad == null) { return 0.0; } // // بدون والد
-////////////        Point a = this.parentRoad.getStartIntersection().getPosition(); // // نقطهٔ A
-////////////        Point b = this.parentRoad.getEndIntersection().getPosition(); // // نقطهٔ B
-////////////        double dx = (double)(b.getX() - a.getX()); // // Δx
-////////////        double dy = (double)(b.getY() - a.getY()); // // Δy
-////////////        double ang = Math.atan2(dy, dx); // // زاویه خط جاده
-////////////        if (this.direction == Direction.WEST || this.direction == Direction.NORTH) { ang += Math.PI; } // // معکوس جهت
-////////////        return ang; // // خروجی
-////////////    }
-////////////
-////////////    public Point getPositionAt(double s) { // // محاسبه نقطه روی لِین با آفست جانبی
-////////////        if (this.parentRoad == null) { return new Point(0, 0); } // // نال‌چک
-////////////        Point a = this.parentRoad.getStartIntersection().getPosition(); // // A
-////////////        Point b = this.parentRoad.getEndIntersection().getPosition(); // // B
-////////////
-////////////        int dx = b.getX() - a.getX(); // // Δx
-////////////        int dy = b.getY() - a.getY(); // // Δy
-////////////        double len = Math.sqrt((double)dx * dx + (double)dy * dy); // // طول جاده
-////////////        if (len <= 1e-9) { return new Point(a.getX(), a.getY()); } // // جلوگیری از تقسیم بر صفر
-////////////
-////////////        // نسبت طولی روی خط مرکزی
-////////////        double t = s / len; // // نسبت 0..1
-////////////        if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0; // // کلمپ
-////////////
-////////////        // نقطهٔ وسطِ خط مرکزی در نسبت t
-////////////        double cx = a.getX() + t * dx; // // X مرکزی
-////////////        double cy = a.getY() + t * dy; // // Y مرکزی
-////////////
-////////////        // نرمالِ واحد به خط (چرخش ۹۰ درجه): برای آفست جانبی
-////////////        double nx = -dy / len; // // نرمال X
-////////////        double ny =  dx / len; // // نرمال Y
-////////////
-////////////        // مقدار آفست: شاخص * فاصلهٔ پایه
-////////////        double off = this.offsetIndex * LANE_CENTER_OFFSET_PX; // // آفست جانبی
-////////////
-////////////        int x = (int)Math.round(cx + nx * off); // // اعمال آفست روی X
-////////////        int y = (int)Math.round(cy + ny * off); // // اعمال آفست روی Y
-////////////        return new Point(x, y); // // خروجی
+////////////    public double getAngleRadians() { // // زاویهٔ حرکت نسبت به محور X (برای rotate تصویر خودرو)
+////////////        Point A = parentRoad.getStartIntersection().getPosition(); // // شروع
+////////////        Point B = parentRoad.getEndIntersection().getPosition();   // // پایان
+////////////        double dx = B.getX() - A.getX(); // // ΔX
+////////////        double dy = B.getY() - A.getY(); // // ΔY
+////////////        return Math.atan2(dy, dx); // // زاویه بر حسب رادیان
 ////////////    }
 ////////////}

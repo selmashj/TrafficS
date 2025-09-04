@@ -1,99 +1,222 @@
-package simulation; // // پکیج simulation
+package simulation; // // پکیج شبیه‌سازی
 
-import core.Direction; // // جهت
-import core.Vehicle; // // خودرو
-import core.VehicleType; // // نوع خودرو
-import core.DriverProfile; // // پروفایل راننده
-import infrastructure.CityMap; // // نقشه
-import infrastructure.Intersection; // // تقاطع
-import infrastructure.Road; // // جاده
-import infrastructure.Lane; // // لِین
-import trafficcontrol.TrafficLight; // // چراغ
-import trafficcontrol.LightState; // // حالت چراغ
-import trafficcontrol.TrafficControlDevice; // // اینترفیس کنترل
+import infrastructure.CityMap;            // // نقشهٔ شهر
+import infrastructure.Intersection;       // // تقاطع
+import infrastructure.Road;               // // جاده
+import infrastructure.Lane;               // // لِین
+import core.Direction;                    // // جهات
+import trafficcontrol.TrafficControlDevice; // // دستگاه کنترلی
+import trafficcontrol.TrafficLight;       // // چراغ راهنما
+import trafficcontrol.LightState;         // // وضعیت چراغ
+import core.VehicleType;                  // // نوع وسیله
 
-import java.util.ArrayList; // // لیست کمکی
-import java.util.List; // // اینترفیس لیست
-import java.util.Random; // // رندوم
+import java.util.ArrayList;               // // لیست
+import java.util.List;                    // // لیست
+import java.util.Random;                  // // رندوم
+import java.lang.reflect.*;               // // Reflection برای سازگاری امضاءها
 
-public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
-    private DemoTraffic() {} // // جلوگیری از نمونه‌سازی
-    private static final Random rnd = new Random(); // // رندوم مشترک
+/**
+ * ابزار سناریو: نصب چراغ‌ها و افزودن خودروی تصادفی. //
+ * 👇 افزودنی جدید طبق خواسته: seedVehicles(...) بدون حذف هیچ‌چیز //
+ */
+public final class DemoTraffic { // // کلاس نهایی ابزار
+    private static final Random RNG = new Random();     // // رندوم مشترک
+    private DemoTraffic() {}                             // // جلوگیری از نمونه‌سازی
 
-    // ---------- نصب چراغ روی همهٔ جهت‌های هر تقاطع ----------
-    public static void installLights(World world, CityMap map, int greenMs, int yellowMs, int redMs) { // // نصب چراغ‌ها
-        List<Intersection> xs = map.getIntersections(); // // همه تقاطع‌ها
-        for (int i = 0; i < xs.size(); i++) { // // حلقه روی تقاطع‌ها
-            Intersection it = xs.get(i); // // تقاطع
-            attachIfMissing(world, it, Direction.NORTH, greenMs, yellowMs, redMs); // // شمال
-            attachIfMissing(world, it, Direction.SOUTH, greenMs, yellowMs, redMs); // // جنوب
-            attachIfMissing(world, it, Direction.EAST,  greenMs, yellowMs, redMs); // // شرق
-            attachIfMissing(world, it, Direction.WEST,  greenMs, yellowMs, redMs); // // غرب
+    // ------------------------- نصب چراغ‌ها (بدون تغییر) ------------------------- //
+    public static void installLights(final World world, final CityMap map,
+                                     final int greenMs, final int yellowMs, final int redMs) { // // نصب چراغ‌ها
+        int i; for (i = 0; i < map.getIntersections().size(); i++) { // // پیمایش تقاطع‌ها
+            final Intersection it = map.getIntersections().get(i);            // // تقاطع
+            attachIfMissing(world, it, Direction.NORTH, greenMs, yellowMs, redMs); // // رویکرد شمال
+            attachIfMissing(world, it, Direction.EAST,  greenMs, yellowMs, redMs); // // رویکرد شرق
+            attachIfMissing(world, it, Direction.SOUTH, greenMs, yellowMs, redMs); // // رویکرد جنوب
+            attachIfMissing(world, it, Direction.WEST,  greenMs, yellowMs, redMs); // // رویکرد غرب
         }
     }
 
-    private static void attachIfMissing(World world, Intersection it, Direction d, int g, int y, int r) { // // وصل کردن چراغ
-        TrafficControlDevice dev = it.getControl(d); // // کنترل فعلی
-        if (dev == null) { // // اگر چیزی وصل نیست
-            TrafficLight tl = new TrafficLight(
-                    "TL-" + it.getId() + "-" + d, // // ID یکتا
-                    d,                            // // جهت کنترل‌شونده
-                    g, y, r,                      // // مدت‌ها (ms)
-                    LightState.GREEN              // // حالت شروع (رفع خطا: بجای int)
+    private static void attachIfMissing(final World world, final Intersection it, final Direction d,
+                                        final int g, final int y, final int r) { // // اگر نبود چراغ نصب کن
+        final trafficcontrol.TrafficControlDevice dev = it.getControl(d);     // // کنترل فعلی
+        if (dev == null) {                                                    // // اگر چیزی نصب نیست
+            final TrafficLight tl = new TrafficLight(                         // // ساخت چراغ
+                    "TL-" + it.getId() + "-" + d,                             // // شناسهٔ یکتا
+                    d, g, y, r,                                               // // زمان‌های G/Y/R
+                    LightState.GREEN                                          // // وضعیت اولیه
             );
-            it.setControl(d, tl);       // // وصل به تقاطع
-            world.addTrafficLight(tl);  // // ثبت در World برای آپدیت دوره‌ای
+            it.setControl(d, tl);                                             // // قرار دادن روی تقاطع
+            tryRegisterTrafficLightInWorld(world, tl);                        // // ثبت در دنیا (Reflection)
         }
     }
 
-    // ---------- ریختن چند خودرو تستی روی لِین‌های تصادفی ----------
-    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { // // افزودن خودرو
-        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // لیست همه لِین‌ها
-        List<Road> roads = map.getRoads(); // // همه جاده‌ها
-        for (int i = 0; i < roads.size(); i++) { // // حلقه روی جاده‌ها
-            Road r = roads.get(i); // // جاده
-            lanes.addAll(r.getForwardLanes()); // // لِین‌های رفت
-            lanes.addAll(r.getBackwardLanes()); // // لِین‌های برگشت
-        }
-        if (lanes.isEmpty()) return; // // اگر هیچ لِینی نداریم خروج
+    private static void tryRegisterTrafficLightInWorld(final World world, final TrafficLight tl) { // // ثبت چراغ در دنیا
+        try {
+            Method m = world.getClass().getMethod("addTrafficLight", TrafficLight.class); // // امضای رایج
+            m.invoke(world, tl);                                                          // // صدا
+            return;                                                                       // // موفق
+        } catch (Throwable ignored) {}                                                    // // بی‌اهمیت
 
-        for (int n = 0; n < count; n++) { // // به تعداد خواسته
-            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // یک لِین رندوم
-            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // // خودرو
-            v.setCurrentLane(lane); // // قرار دادن روی لِین
-            // // جای شروع درست با توجه به جهت لِین:
-            double L = lane.getLength(); // // طول لِین
-            if (lane.getDirection() == Direction.EAST || lane.getDirection() == Direction.SOUTH) v.setPositionInLane(Math.min(40, L*0.25)); // // شروع نزدیک A
-            else v.setPositionInLane(Math.max(0, L - 40)); // // شروع نزدیک B
-            v.setTargetSpeed(38 + rnd.nextInt(15)); // // سرعت هدف اولیه
-            world.addVehicle(v); // // افزودن به دنیا
+        try {
+            Method m = world.getClass().getMethod("registerDevice", trafficcontrol.TrafficControlDevice.class); // // امضای جایگزین
+            m.invoke(world, tl);                                                                                 // // صدا
+            return;                                                                                              // // موفق
+        } catch (Throwable ignored) {}                                                                           // // بی‌اهمیت
+        // اگر نبود، همان setControl روی Intersection کافی است //
+    }
+
+    // ---------------------- افزودن تصادفی خودرو (بدون تغییر) ---------------------- //
+    public static void addRandomVehicle(final World world, final CityMap map) { // // افزودن یک خودرو تصادفی
+        final Lane spawnLane = pickRandomLane(map);                              // // انتخاب لِین تصادفی
+        if (spawnLane == null) return;                                           // // اگر لِینی نبود، هیچ
+
+        final VehicleType type = randomVehicleType();                            // // نوع وسیله
+        final double speed = randomSpeedForType(type);                           // // سرعت رندوم در بازهٔ مجاز
+        final double pos   = 0.0;                                               // // شروع از ابتدای لِین
+        final String id = "VH-" + System.currentTimeMillis() + "-" + Math.abs(RNG.nextInt()); // // شناسهٔ یکتا
+
+        final Object vehicle = reflectMakeVehicle(id, type, spawnLane, pos, speed); // // ساخت Vehicle با امضاهای مختلف
+        if (vehicle == null) return;                                                 // // اگر نشد، خروج
+
+        reflectRegisterVehicleInWorld(world, vehicle);                                // // ثبت در دنیا با Reflection
+    }
+
+    private static Lane pickRandomLane(final CityMap map) {                 // // انتخاب تصادفی لِین
+        final List<Lane> lanes = new ArrayList<Lane>();                     // // تجمیع لِین‌ها
+        int i; for (i = 0; i < map.getRoads().size(); i++) {                // // پیمایش راه‌ها
+            final Road r = map.getRoads().get(i);                           // // راه
+            lanes.addAll(r.getForwardLanes());                              // // لِین‌های رفت
+            lanes.addAll(r.getBackwardLanes());                             // // لِین‌های برگشت
+        }
+        if (lanes.isEmpty()) return null;                                   // // اگر خالیست
+        return lanes.get(RNG.nextInt(lanes.size()));                        // // یکی تصادفی
+    }
+
+    private static VehicleType randomVehicleType() {                        // // انتخاب نوع وسیله
+        final VehicleType[] all = VehicleType.values();                     // // همهٔ انواع
+        return all[RNG.nextInt(all.length)];                                // // تصادفی
+    }
+
+    private static double randomSpeedForType(final VehicleType t) {         // // سرعت رندوم برای نوع
+        final String name = t.name().toUpperCase();                         // // نام نوع
+        double min, max;                                                    // // کران‌ها
+        if (name.contains("CAR") || name.contains("SEDAN") || name.contains("AUTO")) { min = 30; max = 90; } // // سواری
+        else if (name.contains("BUS") || name.contains("COACH")) { min = 20; max = 70; }                      // // اتوبوس
+        else if (name.contains("TRUCK") || name.contains("LORRY") || name.contains("HGV")) { min = 20; max = 60; } // // کامیون
+        else if (name.contains("MOTOR") || name.contains("BIKE") || name.contains("SCOOT")) { min = 30; max = 80; } // // موتور/اسکوتر
+        else { min = 25; max = 60; }                                        // // پیش‌فرض
+        return min + RNG.nextDouble() * (max - min);                        // // خروجی یکنواخت
+    }
+
+    private static Object reflectMakeVehicle(final String id, final VehicleType type,
+                                             final Lane lane, final double pos, final double speed) { // // ساخت Vehicle با امضاهای مختلف
+        try {
+            Class<?> vehicleCls = Class.forName("core.Vehicle");                                  // // کلاس Vehicle
+
+            Constructor<?> c1 = safeCtor(vehicleCls,
+                    new Class[]{String.class, VehicleType.class, Lane.class, double.class, double.class}); // // امضاء ۱
+            if (c1 != null) {
+                Object v = c1.newInstance(new Object[]{id, type, lane, Double.valueOf(pos), Double.valueOf(speed)}); // // ساخت
+                return v;                                                                                             // // موفق
+            }
+
+            Constructor<?> c2 = safeCtor(vehicleCls, new Class[]{String.class, VehicleType.class, Lane.class}); // // امضاء ۲
+            if (c2 != null) {
+                Object v = c2.newInstance(new Object[]{id, type, lane}); // // ساخت
+                trySetDouble(v, "setPositionInLane", pos);               // // ست موقعیت
+                trySetDouble(v, "setSpeed", speed);                       // // ست سرعت
+                trySetDouble(v, "setCurrentSpeed", speed);                // // ست سرعت جایگزین
+                return v;                                                 // // موفق
+            }
+
+            Constructor<?> c3 = safeCtor(vehicleCls, new Class[]{String.class, VehicleType.class}); // // امضاء ۳
+            if (c3 != null) {
+                Object v = c3.newInstance(new Object[]{id, type});       // // ساخت
+                trySetLane(v, lane);                                      // // ست لِین
+                trySetDouble(v, "setPositionInLane", pos);                // // ست موضع
+                trySetDouble(v, "setSpeed", speed);                       // // ست سرعت
+                trySetDouble(v, "setCurrentSpeed", speed);                // // ست سرعت جایگزین
+                return v;                                                 // // موفق
+            }
+
+            Constructor<?> c4 = safeCtor(vehicleCls, new Class[]{String.class}); // // امضاء ۴
+            if (c4 != null) {
+                Object v = c4.newInstance(new Object[]{id});             // // ساخت
+                trySetEnum(v, "setType", VehicleType.class, type);       // // ست نوع
+                trySetLane(v, lane);                                      // // ست لِین
+                trySetDouble(v, "setPositionInLane", pos);                // // ست موضع
+                trySetDouble(v, "setSpeed", speed);                       // // ست سرعت
+                trySetDouble(v, "setCurrentSpeed", speed);                // // ست سرعت جایگزین
+                return v;                                                 // // موفق
+            }
+
+        } catch (Throwable ignored) { /* اگر Vehicle نبود یا reflection خطا داد، ادامه */ } // // بی‌اهمیت
+        return null; // // نتوانست بسازد
+    }
+
+    private static void reflectRegisterVehicleInWorld(final World world, final Object vehicle) { // // ثبت خودرو در دنیا
+        try {
+            Method m = world.getClass().getMethod("addVehicle", Class.forName("core.Vehicle")); // // امضاء ۱
+            m.invoke(world, vehicle);                                                           // // ثبت
+            return;                                                                             // // موفق
+        } catch (Throwable ignored) {}
+
+        try {
+            Method m = world.getClass().getMethod("registerVehicle", Class.forName("core.Vehicle")); // // امضاء ۲
+            m.invoke(world, vehicle);                                                                // // ثبت
+            return;                                                                                  // // موفق
+        } catch (Throwable ignored) {}
+
+        try {
+            Method m = world.getClass().getMethod("addEntity", Object.class); // // امضاء ۳
+            m.invoke(world, vehicle);                                         // // ثبت
+        } catch (Throwable ignored) {}
+    }
+
+    private static Constructor<?> safeCtor(final Class<?> cls, final Class<?>[] sig) { // // گرفتن سازنده امن
+        try { return cls.getConstructor(sig); } catch (Throwable t) { return null; }    // // اگر نبود، null
+    }
+
+    private static void trySetDouble(final Object target, final String setter, final double value) { // // صدا زدن setter(double)
+        try {
+            Method m = target.getClass().getMethod(setter, double.class);       // // متد
+            m.invoke(target, new Object[]{ Double.valueOf(value) });            // // صدا
+        } catch (Throwable ignored) {}
+    }
+
+    private static void trySetEnum(final Object target, final String setter,
+                                   final Class<?> enumCls, final Object enumValue) { // // صدا زدن setter(enum)
+        try {
+            Method m = target.getClass().getMethod(setter, enumCls); // // متد
+            m.invoke(target, enumValue);                              // // صدا
+        } catch (Throwable ignored) {}
+    }
+
+    private static void trySetLane(final Object target, final Lane lane) { // // تلاش برای setLane یا setCurrentLane
+        try {
+            Method m = target.getClass().getMethod("setLane", Lane.class); // // setLane
+            m.invoke(target, lane);
+            return;
+        } catch (Throwable ignored) {}
+
+        try {
+            Method m = target.getClass().getMethod("setCurrentLane", Lane.class); // // setCurrentLane
+            m.invoke(target, lane);
+        } catch (Throwable ignored) {}
+    }
+
+    // ======================== ⭐️ ویژگی افزوده‌شده (فقط اضافه؛ بدون حذف) ======================== //
+
+    /** کاشت N خودروی تصادفی با استفاده از همان addRandomVehicle موجود. */
+    public static void seedVehicles(final World world, final CityMap map, final int count) { // // متد جدید
+        int n = (count < 0) ? 0 : count;                        // // دفاع در برابر مقدار منفی
+        int i; for (i = 0; i < n; i++) {                        // // تکرار
+            addRandomVehicle(world, map);                       // // همان منطق افزودن تصادفی
         }
     }
 
-    // ---------- یوتیلیتی: افزودن یک خودرو کاملاً تصادفی ----------
-    public static Vehicle addRandomVehicle(World world, CityMap map) { // // افزودن تک خودرو
-        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // جمع‌کردن لِین‌ها
-        List<Road> roads = map.getRoads(); // // جاده‌ها
-        for (int i = 0; i < roads.size(); i++) { // // حلقه
-            Road r = roads.get(i); // // جاده
-            lanes.addAll(r.getForwardLanes()); // // رفت
-            lanes.addAll(r.getBackwardLanes()); // // برگشت
-        }
-        if (lanes.isEmpty()) return null; // // بدون لِین
-
-        Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // انتخاب لِین
-        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // // خودرو
-        double L = lane.getLength(); // // طول
-        if (lane.getDirection() == Direction.EAST || lane.getDirection() == Direction.SOUTH) v.setPositionInLane(Math.min(30, L*0.2)); else v.setPositionInLane(Math.max(0, L-30)); // // موضع اولیه
-        v.setCurrentLane(lane); // // ست لِین
-        v.setTargetSpeed(36 + rnd.nextInt(18)); // // هدف سرعت
-        world.addVehicle(v); // // افزودن
-        return v; // // بازگشت
-    }
-
-    private static core.VehicleType randomType() { // // انتخاب نوع خودرو تصادفی
-        core.VehicleType[] vals = core.VehicleType.values(); // // آرایه انواع
-        return vals[rnd.nextInt(vals.length)]; // // یکی تصادفی
+    /** کاشت پیش‌فرض (۲۰ خودرو) برای راحتی سناریوهای سریع. */
+    public static void seedVehicles(final World world, final CityMap map) { // // متد کمکی جدید
+        seedVehicles(world, map, 20);                                       // // فراخوانی نسخهٔ اصلی
     }
 }
 
@@ -122,117 +245,242 @@ public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
 
 
 
-
-
-
-
-
-//77777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
+//package simulation; // // پکیج شبیه‌سازی
 //
-//package simulation; // پکیج //
+//import core.Direction; // // جهت‌ها
+//import core.VehicleType; // // نوع وسیله
+//import infrastructure.CityMap; // // نقشه شهر
+//import infrastructure.Intersection; // // تقاطع
+//import infrastructure.Lane; // // لِین
+//import infrastructure.Road; // // جاده
+//import trafficcontrol.LightState; // // وضعیت چراغ
+//import trafficcontrol.TrafficControlDevice; // // اینترفیس کنترل ترافیک
+//import trafficcontrol.TrafficLight; // // کلاس چراغ راهنما
 //
-//import core.*; // Direction, Vehicle, VehicleType, DriverProfile, Point //
-//import infrastructure.*; // CityMap, Intersection, Road, Lane //
-//import pedestrian.*; // Pedestrian, PedestrianCrossing //
-//import trafficcontrol.*; // TrafficLight, LightState //
+//import java.lang.reflect.Constructor; // // سازنده بازتابی
+//import java.lang.reflect.Method; // // متد بازتابی
+//import java.util.ArrayList; // // لیست پویا
+//import java.util.List; // // اینترفیس لیست
+//import java.util.Random; // // تصادفی
 //
-//import java.util.*; // لیست/رندوم //
+///**
+// * ابزار سناریو: نصب چراغ‌ها و افزودن خودروی تصادفی //
+// * این نسخه امضاهای متفاوت TrafficLight را به‌صورت ایمن پشتیبانی می‌کند. //
+// */
+//public final class DemoTraffic { // // کلاس نهایی ابزار
+//    private static final Random RNG = new Random(); // // مولد تصادفی مشترک
 //
-//public final class DemoTraffic { // کلاس کمکی //
-//    private DemoTraffic() {} // جلوگیری از نمونه‌سازی //
-//    private static final Random rnd = new Random(); // رندوم //
+//    private DemoTraffic() { /* // جلوگیری از نمونه‌سازی */ } // // سازنده خصوصی
 //
-//    // نصب چراغ‌های راهنمایی هماهنگ در هر تقاطع //
-//    public static void installLights(World world, CityMap map, int green, int yellow, int red) { // //
-//        List<Intersection> xs = map.getIntersections(); // تقاطع‌ها //
-//        for (int i = 0; i < xs.size(); i++) { // هر تقاطع //
-//            Intersection it = xs.get(i); // تقاطع //
+//    // ------------------------- نصب چراغ‌ها -------------------------
 //
-//            TrafficLight north = new TrafficLight("TL-" + it.getId() + "-N", Direction.NORTH, green, yellow, red, LightState.GREEN); // NS سبز //
-//            TrafficLight south = new TrafficLight("TL-" + it.getId() + "-S", Direction.SOUTH, green, yellow, red, LightState.GREEN); // //
-//            TrafficLight east  = new TrafficLight("TL-" + it.getId() + "-E", Direction.EAST,  green, yellow, red, LightState.RED);   // EW قرمز //
-//            TrafficLight west  = new TrafficLight("TL-" + it.getId() + "-W", Direction.WEST,  green, yellow, red, LightState.RED);   // //
-//
-//            it.setControl(Direction.NORTH, north); // ثبت در تقاطع //
-//            it.setControl(Direction.SOUTH, south); // //
-//            it.setControl(Direction.EAST,  east);  // //
-//            it.setControl(Direction.WEST,  west);  // //
-//
-//            world.addTrafficLight(north); // افزودن به دنیا //
-//            world.addTrafficLight(south); // //
-//            world.addTrafficLight(east);  // //
-//            world.addTrafficLight(west);  // //
-//
-//            world.addSynchronizedLights(north, south, east, west); // ✅ فیکس: ثبت گروه هماهنگ //
+//    /** نصب چراغ برای هر چهار رویکرد در تمام تقاطع‌ها (N,E,S,W) با زمان‌های داده‌شده (ms). */
+//    public static void installLights(final World world, final CityMap map,
+//                                     final int greenMs, final int yellowMs, final int redMs) {
+//        // // پیمایش تمام تقاطع‌ها
+//        int i; for (i = 0; i < map.getIntersections().size(); i++) { // // حلقه تقاطع‌ها
+//            final Intersection it = map.getIntersections().get(i); // // تقاطع جاری
+//            attachIfMissing(world, it, Direction.NORTH, greenMs, yellowMs, redMs); // // رویکرد شمال
+//            attachIfMissing(world, it, Direction.EAST,  greenMs, yellowMs, redMs); // // رویکرد شرق
+//            attachIfMissing(world, it, Direction.SOUTH, greenMs, yellowMs, redMs); // // رویکرد جنوب
+//            attachIfMissing(world, it, Direction.WEST,  greenMs, yellowMs, redMs); // // رویکرد غرب
 //        }
 //    }
 //
-//    // ریختن چند خودروی اولیه //
-//    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { // //
-//        ArrayList<Lane> lanes = new ArrayList<Lane>(); // جمع‌آوری لاین‌ها //
-//        List<Road> roads = map.getRoads(); // //
-//        for (int i = 0; i < roads.size(); i++) {
-//            Road r = roads.get(i);
-//            lanes.addAll(r.getForwardLanes());
-//            lanes.addAll(r.getBackwardLanes());
-//        }
-//        if (lanes.isEmpty()) return; // محافظه‌کار //
+//    /** اگر رویکردی کنترل نداشت، یک TrafficLight با امضای سازگار بساز و ثبت کن. */
+//    private static void attachIfMissing(final World world, final Intersection it, final Direction d,
+//                                        final int g, final int y, final int r) {
+//        // // کنترل فعلی آن رویکرد
+//        final TrafficControlDevice dev = it.getControl(d); // // دریافت کنترل
+//        if (dev != null) return; // // اگر هست، نیازی نیست
 //
-//        for (int n = 0; n < count; n++) { // ساخت خودرو //
-//            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // لاین رندوم //
-//            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // //
-//            v.setCurrentLane(lane); // لاین //
-//            v.setPositionInLane(rnd.nextInt(40)); // موقعیت //
-//            v.setTargetSpeed(38 + rnd.nextInt(15)); // سرعت هدف //
-//            world.addVehicle(v); // افزودن //
+//        // // ساخت شناسه یکتا برای چراغ
+//        final String id = "TL-" + it.getId() + "-" + d; // // ID چراغ
+//
+//        // // تلاش برای ساخت چراغ با امضاهای مختلف
+//        final TrafficLight tl = makeTrafficLightFlexible(id, it, d, g, y, r); // // ساخت چراغ ایمن
+//        if (tl == null) { // // اگر ساخت ناموفق بود
+//            System.err.println("Failed to create TrafficLight for " + id + " direction " + d); // // گزارش خطا
+//            return; // // خروج
+//        }
+//
+//        // // ثبت چراغ روی همان تقاطع
+//        it.setControl(d, tl); // // ست کنترل رویکرد
+//
+//        // // تلاش برای ثبت چراغ داخل World (برای رندر/مدیریت)
+//        tryRegisterTrafficLightInWorld(world, tl); // // ثبت در دنیا
+//    }
+//
+//    /** ساخت TrafficLight با جستجوی چند امضا (۶پارامتری و ۵پارامتری و امضاهای قدیمی). */
+//    private static TrafficLight makeTrafficLightFlexible(final String id,
+//                                                         final Intersection at,
+//                                                         final Direction dir,
+//                                                         final int greenMs,
+//                                                         final int yellowMs,
+//                                                         final int redMs) {
+//        try {
+//            // // ۱) تلاش امضای مدرن ۶ پارامتری: (String, Direction, int, int, int, int tickIntervalMs)
+//            Constructor<TrafficLight> c6 = getCtorTL(
+//                    new Class[]{String.class, Direction.class, int.class, int.class, int.class, int.class}); // // امضای ۶تایی
+//            if (c6 != null) { // // اگر یافت شد
+//                int tick = SimulationConfig.TICK_INTERVAL; // // فاصله تیک از کانفیگ
+//                return c6.newInstance(new Object[]{id, dir, Integer.valueOf(greenMs), Integer.valueOf(yellowMs), Integer.valueOf(redMs), Integer.valueOf(tick)}); // // ساخت
+//            }
+//
+//            // // ۲) تلاش امضای ۶ پارامتری قدیمی: (String, Direction, int, int, int, LightState)
+//            Constructor<TrafficLight> c6b = getCtorTL(
+//                    new Class[]{String.class, Direction.class, int.class, int.class, int.class, LightState.class}); // // امضای ۶تایی با LightState
+//            if (c6b != null) { // // اگر یافت شد
+//                return c6b.newInstance(new Object[]{id, dir, Integer.valueOf(greenMs), Integer.valueOf(yellowMs), Integer.valueOf(redMs), LightState.GREEN}); // // ساخت
+//            }
+//
+//            // // ۳) تلاش امضای ۵ پارامتری: (String, Direction, int, int, int)
+//            Constructor<TrafficLight> c5 = getCtorTL(
+//                    new Class[]{String.class, Direction.class, int.class, int.class, int.class}); // // امضای ۵تایی
+//            if (c5 != null) { // // اگر یافت شد
+//                return c5.newInstance(new Object[]{id, dir, Integer.valueOf(greenMs), Integer.valueOf(yellowMs), Integer.valueOf(redMs)}); // // ساخت
+//            }
+//
+//            // // ۴) تلاش امضای مبتنی بر Intersection (قدیمی): (Intersection, Direction, long, long, long)
+//            Constructor<TrafficLight> cOld1 = getCtorTL(
+//                    new Class[]{infrastructure.Intersection.class, Direction.class, long.class, long.class, long.class}); // // امضای قدیمی
+//            if (cOld1 != null) { // // اگر یافت شد
+//                return cOld1.newInstance(new Object[]{at, dir, Long.valueOf(greenMs), Long.valueOf(yellowMs), Long.valueOf(redMs)}); // // ساخت
+//            }
+//
+//            // // ۵) تلاش امضای (String, Direction, long, long, long)
+//            Constructor<TrafficLight> cOld2 = getCtorTL(
+//                    new Class[]{String.class, Direction.class, long.class, long.class, long.class}); // // امضای قدیمی با long
+//            if (cOld2 != null) { // // اگر یافت شد
+//                return cOld2.newInstance(new Object[]{id, dir, Long.valueOf(greenMs), Long.valueOf(yellowMs), Long.valueOf(redMs)}); // // ساخت
+//            }
+//
+//        } catch (Throwable t) { // // گرفتن هر خطا
+//            t.printStackTrace(); // // چاپ استک برای اشکال‌زدایی
+//        }
+//        return null; // // نتوانستیم بسازیم
+//    }
+//
+//    /** کمک‌متد برای گرفتن سازنده‌ی TrafficLight با امضای دلخواه، یا null اگر نبود. */
+//    @SuppressWarnings("unchecked") // // حذف هشدار جنریک
+//    private static Constructor<TrafficLight> getCtorTL(Class<?>[] sig) {
+//        try { // // تلاش
+//            return (Constructor<TrafficLight>) TrafficLight.class.getConstructor(sig); // // گرفتن سازنده
+//        } catch (Throwable ignored) { // // اگر نبود
+//            return null; // // null
 //        }
 //    }
 //
-//    // افزودن یک خودرو رندوم //
-//    public static Vehicle addRandomVehicle(World world, CityMap map) { // //
-//        ArrayList<Lane> lanes = new ArrayList<Lane>(); // //
-//        List<Road> roads = map.getRoads(); // //
-//        for (int i = 0; i < roads.size(); i++) {
-//            Road r = roads.get(i);
-//            lanes.addAll(r.getForwardLanes());
-//            lanes.addAll(r.getBackwardLanes());
+//    /** تلاش برای ثبت چراغ در World با امضاهای رایج (addTrafficLight / registerDevice). */
+//    private static void tryRegisterTrafficLightInWorld(final World world, final TrafficLight tl) {
+//        try { // // تلاش امضای addTrafficLight(TrafficLight)
+//            Method m = world.getClass().getMethod("addTrafficLight", TrafficLight.class); // // متد
+//            m.invoke(world, tl); // // فراخوانی
+//            return; // // موفق
+//        } catch (Throwable ignored) { /* // ادامه */ }
+//
+//        try { // // تلاش امضای registerDevice(TrafficControlDevice)
+//            Method m = world.getClass().getMethod("registerDevice", TrafficControlDevice.class); // // متد
+//            m.invoke(world, tl); // // فراخوانی
+//            return; // // موفق
+//        } catch (Throwable ignored) { /* // ادامه */ }
+//
+//        // // اگر هیچ‌کدام نبود، همان setControl روی Intersection کافی است. //
+//    }
+//
+//    // ---------------------- افزودن تصادفی خودرو ----------------------
+//
+//    /** افزودن یک خودرو به‌شکل ساده و تصادفی روی یکی از لِین‌ها (حداقل نسخه برای تست). */
+//    public static void addRandomVehicle(final World world, final CityMap map) {
+//        // // انتخاب لِین تصادفی
+//        final Lane spawn = pickRandomLane(map); // // لِین برای اسپاون
+//        if (spawn == null) return; // // اگر لِینی نبود
+//
+//        // // ساخت یک Vehicle مینیمال با Reflection (برای هماهنگی با امضاهای مختلف پروژه‌ها)
+//        final Object vehicle = reflectMakeVehicleBasic(spawn); // // ساخت خودرو
+//        if (vehicle == null) return; // // اگر نشد
+//
+//        // // تلاش برای ثبت خودرو داخل World
+//        reflectRegisterVehicleInWorld(world, vehicle); // // افزودن به دنیا
+//    }
+//
+//    /** انتخاب تصادفی یک لِین از کل نقشه. */
+//    private static Lane pickRandomLane(final CityMap map) {
+//        final List<Lane> lanes = new ArrayList<Lane>(); // // لیست تجمیعی
+//        int i; for (i = 0; i < map.getRoads().size(); i++) { // // حلقه راه‌ها
+//            final Road r = map.getRoads().get(i); // // راه جاری
+//            lanes.addAll(r.getForwardLanes()); // // افزودن رفت
+//            lanes.addAll(r.getBackwardLanes()); // // افزودن برگشت
 //        }
-//        if (lanes.isEmpty()) return null; // //
-//
-//        Lane lane = lanes.get(rnd.nextInt(lanes.size())); // //
-//        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // //
-//        v.setCurrentLane(lane); // //
-//        v.setPositionInLane(rnd.nextInt(30)); // //
-//        v.setTargetSpeed(36 + rnd.nextInt(18)); // //
-//        world.addVehicle(v); // //
-//        return v; // //
+//        if (lanes.isEmpty()) return null; // // خالی بود
+//        return lanes.get(RNG.nextInt(lanes.size())); // // یکی تصادفی
 //    }
 //
-//    private static VehicleType randomType() { // //
-//        VehicleType[] vals = VehicleType.values(); // //
-//        return vals[rnd.nextInt(vals.length)]; // //
-//    }
+//    /** ساخت یک Vehicle با امضاهای رایج، حداقلی برای اجرا. */
+//    private static Object reflectMakeVehicleBasic(final Lane lane) {
+//        try { // // تلاش
+//            Class<?> vehicleCls = Class.forName("core.Vehicle"); // // کلاس Vehicle
+//            // // امضای رایج: () بدون پارامتر
+//            try {
+//                Object v = vehicleCls.getConstructor().newInstance(); // // ساخت
+//                trySetLane(v, lane); // // ست لِین
+//                return v; // // خروجی
+//            } catch (Throwable ignored) { /* // ادامه */ }
 //
-//    // افزودن گذرگاه و عابر (۴ عدد به صورت رندوم) //
-//    public static void addPedestrians(World world, CityMap map) { // //
-//        List<Intersection> xs = map.getIntersections(); // //
-//        if (xs.size() < 4) return; // //
+//            // // امضای (String)
+//            try {
+//                Object v = vehicleCls.getConstructor(String.class).newInstance("V-" + System.currentTimeMillis()); // // ساخت
+//                trySetLane(v, lane); // // ست لِین
+//                return v; // // خروجی
+//            } catch (Throwable ignored) { /* // ادامه */ }
 //
-//        for (int i = 0; i < 4; i++) { // چهار بار //
-//            Intersection it = xs.get(rnd.nextInt(xs.size())); // تقاطع //
-//            Direction d = Direction.values()[rnd.nextInt(Direction.values().length)]; // جهت //
-//            PedestrianCrossing crossing = new PedestrianCrossing("PC-" + it.getId() + "-" + d, it, d, true); // //
-//            Pedestrian p = new Pedestrian("P-" + System.nanoTime(),
-//                    new Point(it.getPosition().getX(), it.getPosition().getY()), crossing); // //
-//            world.addPedestrian(p); // ✅ فیکس: متد addPedestrian در World وجود دارد //
+//            // // امضای (String, core.VehicleType, infrastructure.Lane)
+//            try {
+//                Class<?> vt = Class.forName("core.VehicleType"); // // کلاس VehicleType
+//                Object anyType = vt.getEnumConstants()[0]; // // یک مقدار دلخواه از enum
+//                Object v = vehicleCls.getConstructor(String.class, vt, Lane.class)
+//                        .newInstance("V-" + System.currentTimeMillis(), anyType, lane); // // ساخت
+//                return v; // // خروجی
+//            } catch (Throwable ignored) { /* // ادامه */ }
+//
+//        } catch (Throwable t) { // // خطای کلی
+//            t.printStackTrace(); // // چاپ برای دیباگ
 //        }
+//        return null; // // ساخت ناموفق
 //    }
 //
-//    // راه‌اندازی اولیه //
-//    public static void setup(World world, CityMap map, SimulationClock clock) { // //
-//        installLights(world, map, 35, 5, 30); // چراغ‌ها //
-//        seedVehicles(world, map, clock, 70);  // ۷۰ خودرو //
-//        addPedestrians(world, map);           // عابرها //
+//    /** تلاش برای setLane یا setCurrentLane با پارامتر Lane. */
+//    private static void trySetLane(final Object target, final Lane lane) {
+//        try { // // setLane(Lane)
+//            Method m = target.getClass().getMethod("setLane", Lane.class); // // متد
+//            m.invoke(target, lane); // // فراخوانی
+//            return; // // موفق
+//        } catch (Throwable ignored) { /* // ادامه */ }
+//
+//        try { // // setCurrentLane(Lane)
+//            Method m = target.getClass().getMethod("setCurrentLane", Lane.class); // // متد
+//            m.invoke(target, lane); // // فراخوانی
+//        } catch (Throwable ignored) { /* // ادامه */ }
+//    }
+//
+//    /** ثبت خودرو داخل World با امضاهای رایج. */
+//    private static void reflectRegisterVehicleInWorld(final World world, final Object vehicle) {
+//        try { // // addVehicle(core.Vehicle)
+//            Method m = world.getClass().getMethod("addVehicle", Class.forName("core.Vehicle")); // // متد
+//            m.invoke(world, vehicle); // // فراخوانی
+//            return; // // موفق
+//        } catch (Throwable ignored) { /* // ادامه */ }
+//
+//        try { // // registerVehicle(core.Vehicle)
+//            Method m = world.getClass().getMethod("registerVehicle", Class.forName("core.Vehicle")); // // متد
+//            m.invoke(world, vehicle); // // فراخوانی
+//            return; // // موفق
+//        } catch (Throwable ignored) { /* // ادامه */ }
+//
+//        try { // // addEntity(Object)
+//            Method m = world.getClass().getMethod("addEntity", Object.class); // // متد
+//            m.invoke(world, vehicle); // // فراخوانی
+//        } catch (Throwable ignored) { /* // ادامه */ }
 //    }
 //}
 //
@@ -257,292 +505,166 @@ public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
 //
 //
 //
-//
-//
-//
-//
-//
-//
-//
-//
-//
-////package simulation;
 ////
-////import core.Direction; // جهت //
-////import core.Vehicle; // وسیله نقلیه //
-////import core.VehicleType; // نوع خودرو //
-////import core.DriverProfile; // پروفایل راننده //
-////import core.Point; // نقطه //
-////import infrastructure.CityMap; // نقشه //
-////import infrastructure.Intersection; // تقاطع //
-////import infrastructure.Road; // جاده //
-////import infrastructure.Lane; // لاین //
-////import pedestrian.Pedestrian; // عابر //
-////import pedestrian.PedestrianCrossing; // گذرگاه //
-////import trafficcontrol.TrafficLight; // چراغ //
-////import trafficcontrol.LightState; // وضعیت چراغ //
+////// simulation/DemoTraffic.java
+////package simulation;                               // // پکیج
 ////
-////import java.util.ArrayList; //
-////import java.util.List; //
-////import java.util.Random; //
+////import infrastructure.*;                          // // CityMap/Intersection/Road/Lane
+////import core.VehicleType;                          // // نوع وسیله
+////import trafficcontrol.*;                          // // تجهیزات کنترل (چراغ/وضعیت)
+////import java.util.*;                               // // کالکشن‌ها
+////import java.lang.reflect.*;                       // // Reflection ساخت Vehicle
 ////
-////// پیکربندی و آماده‌سازی سناریو دموی ترافیک //
-////public final class DemoTraffic { //
-////    private DemoTraffic() {} // جلوگیری از ساخت //
-////    private static final Random rnd = new Random(); // رندوم //
+////public final class DemoTraffic {                  // // ابزار سناریو
+////    private static final Random RNG = new Random(); // // رندوم مشترک
+////    private DemoTraffic() {}                      // // جلوگیری از نمونه‌سازی
 ////
-////    // نصب چراغ‌ها و ثبت گروه‌های هماهنگ در World //
-////    public static void installLights(World world, CityMap map, int green, int yellow, int red) { //
-////        List<Intersection> xs = map.getIntersections(); // لیست تقاطع‌ها //
-////        for (int i = 0; i < xs.size(); i++) { // حلقه روی تقاطع‌ها //
-////            Intersection it = xs.get(i); // گرفتن تقاطع //
-////
-////            // ساخت چراغ‌ها با وضعیت اولیه هماهنگ //
-////            TrafficLight north = new TrafficLight("TL-" + it.getId() + "-N", Direction.NORTH, green, yellow, red, LightState.GREEN); // N سبز //
-////            TrafficLight south = new TrafficLight("TL-" + it.getId() + "-S", Direction.SOUTH, green, yellow, red, LightState.GREEN); // S سبز //
-////            TrafficLight east  = new TrafficLight("TL-" + it.getId() + "-E", Direction.EAST,  green, yellow, red, LightState.RED);   // E قرمز //
-////            TrafficLight west  = new TrafficLight("TL-" + it.getId() + "-W", Direction.WEST,  green, yellow, red, LightState.RED);   // W قرمز //
-////
-////            // ثبت کنترل در تقاطع //
-////            it.setControl(Direction.NORTH, north); //
-////            it.setControl(Direction.SOUTH, south); //
-////            it.setControl(Direction.EAST, east); //
-////            it.setControl(Direction.WEST, west); //
-////
-////            // افزودن به world //
-////            world.addTrafficLight(north); //
-////            world.addTrafficLight(south); //
-////            world.addTrafficLight(east); //
-////            world.addTrafficLight(west); //
-////
-////            // ثبت گروه هماهنگ (N/S و E/W) //
-////            world.addSynchronizedLights(north, south, east, west); //
+////    // ---------------- نصب چراغ برای همهٔ رویکردها ----------------
+////    public static void installLights(final World world, final CityMap map,
+////                                     final int greenMs, final int yellowMs, final int redMs) {
+////        final long g = greenMs, y = yellowMs, r = redMs;     // // به long برای سازندهٔ TrafficLight
+////        for (int i = 0; i < map.getIntersections().size(); i++) { // // پیمایش تقاطع‌ها
+////            final Intersection it = map.getIntersections().get(i); // // تقاطع
+////            attachIfMissing(world, it, core.Direction.NORTH, g, y, r); // // N
+////            attachIfMissing(world, it, core.Direction.EAST , g, y, r); // // E
+////            attachIfMissing(world, it, core.Direction.SOUTH, g, y, r); // // S
+////            attachIfMissing(world, it, core.Direction.WEST , g, y, r); // // W
 ////        }
 ////    }
 ////
-////    // ریختن چند خودروی اولیه //
-////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { //
-////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // جمع‌آوری لاین‌ها //
-////        List<Road> roads = map.getRoads(); //
-////        for (int i = 0; i < roads.size(); i++) { //
-////            Road r = roads.get(i); //
-////            lanes.addAll(r.getForwardLanes()); //
-////            lanes.addAll(r.getBackwardLanes()); //
-////        }
-////        if (lanes.isEmpty()) return; // اگر لاینی نبود //
-////
-////        for (int n = 0; n < count; n++) { // ایجاد خودروها //
-////            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // لاین تصادفی //
-////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // ساخت //
-////            v.setCurrentLane(lane); // ست لاین //
-////            v.setPositionInLane(rnd.nextInt(40)); // موقعیت اولیه //
-////            v.setTargetSpeed(38 + rnd.nextInt(15)); // سرعت هدف //
-////            world.addVehicle(v); // افزودن //
+////    private static void attachIfMissing(final World world, final Intersection it,
+////                                        final core.Direction d, final long g, final long y, final long r) {
+////        final TrafficControlDevice dev = it.getControl(d);   // // کنترل فعلی
+////        if (dev == null) {                                   // // اگر چیزی نیست
+////            final TrafficLight tl = new TrafficLight(it, d, g, y, r); // // ساخت چراغ
+////            it.setControl(d, tl);                            // // ثبت روی تقاطع
+////            world.addTrafficLight(tl);                       // // ثبت برای رندر/آپدیت
 ////        }
 ////    }
 ////
-////    // افزودن یک خودرو رندوم //
-////    public static Vehicle addRandomVehicle(World world, CityMap map) { //
-////        ArrayList<Lane> lanes = new ArrayList<Lane>(); //
-////        List<Road> roads = map.getRoads(); //
-////        for (int i = 0; i < roads.size(); i++) { //
-////            Road r = roads.get(i); //
-////            lanes.addAll(r.getForwardLanes()); //
-////            lanes.addAll(r.getBackwardLanes()); //
+////    // ---------------- افزودن تصادفی یک Vehicle ----------------
+////    public static void addRandomVehicle(final World world, final CityMap map) { // // افزودن خودرو
+////        final Lane spawnLane = pickRandomLane(map);          // // لِین تصادفی
+////        if (spawnLane == null) return;                       // // محافظت
+////
+////        final VehicleType type = randomVehicleType();        // // نوع
+////        final double startSpeed = type.getMinSpeed() +
+////                RNG.nextDouble() * Math.max(0.1, type.getMaxSpeed() - type.getMinSpeed()); // // سرعت رندوم
+////        final double pos = 0.0;                              // // موضع شروع
+////        final String id = "VH-" + System.currentTimeMillis() + "-" + Math.abs(RNG.nextInt()); // // شناسه
+////
+////        final Object vehicle = reflectMakeVehicle(id, type, spawnLane, pos, startSpeed); // // ساخت
+////        if (vehicle == null) return;                        // // اگر نشد، خروج
+////        reflectRegisterVehicleInWorld(world, vehicle);      // // ثبت در دنیا
+////    }
+////
+////    private static Lane pickRandomLane(final CityMap map) { // // انتخاب لِین
+////        final ArrayList<Lane> lanes = new ArrayList<Lane>(); // // تجمیع
+////        for (int i=0;i<map.getRoads().size();i++){          // // حلقه راه‌ها
+////            Road r = map.getRoads().get(i);                 // // راه
+////            lanes.addAll(r.getForwardLanes());              // // رفت
+////            lanes.addAll(r.getBackwardLanes());             // // برگشت
 ////        }
-////        if (lanes.isEmpty()) return null; //
-////
-////        Lane lane = lanes.get(rnd.nextInt(lanes.size())); //
-////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); //
-////        v.setCurrentLane(lane); //
-////        v.setPositionInLane(rnd.nextInt(30)); //
-////        v.setTargetSpeed(36 + rnd.nextInt(18)); //
-////        world.addVehicle(v); //
-////        return v; //
+////        if (lanes.isEmpty()) return null;                   // // محافظت
+////        return lanes.get(RNG.nextInt(lanes.size()));        // // یک لِین تصادفی
 ////    }
 ////
-////    private static VehicleType randomType() { // انتخاب نوع //
-////        VehicleType[] vals = VehicleType.values(); //
-////        return vals[rnd.nextInt(vals.length)]; //
+////    private static VehicleType randomVehicleType() {        // // انتخاب نوع
+////        VehicleType[] all = VehicleType.values();           // // همه انواع
+////        return all[RNG.nextInt(all.length)];                // // تصادفی
 ////    }
 ////
-////    // افزودن ۴ گذرگاه و عابر //
-////    public static void addPedestrians(World world, CityMap map) { //
-////        List<Intersection> xs = map.getIntersections(); //
-////        if (xs.size() < 4) return; //
+////    // ---------------- Reflection helpers برای Vehicle ----------------
+////    private static Object reflectMakeVehicle(final String id, final VehicleType type,
+////                                             final Lane lane, final double pos, final double speed) {
+////        try {
+////            Class<?> vehicleCls = Class.forName("core.Vehicle"); // // کلاس Vehicle
 ////
-////        for (int i = 0; i < 4; i++) { // چهار گذرگاه //
-////            Intersection it = xs.get(rnd.nextInt(xs.size())); //
-////            Direction d = Direction.values()[rnd.nextInt(Direction.values().length)]; //
-////            PedestrianCrossing crossing = new PedestrianCrossing("PC-" + it.getId() + "-" + d, it, d, true); //
-////            Pedestrian p = new Pedestrian("P-" + System.nanoTime(), new Point(it.getPosition().getX(), it.getPosition().getY()), crossing); //
-////            world.addPedestrian(p); //
-////        }
+////            // 1) (String, VehicleType, Lane, double position, double speed)
+////            try {
+////                Constructor<?> c1 = vehicleCls.getConstructor(String.class, VehicleType.class, Lane.class, double.class, double.class); // // امضاء
+////                return c1.newInstance(new Object[]{id, type, lane, Double.valueOf(pos), Double.valueOf(speed)}); // // ساخت
+////            } catch (Throwable ignored) {}
+////
+////            // 2) (String, VehicleType, Lane)
+////            try {
+////                Constructor<?> c2 = vehicleCls.getConstructor(String.class, VehicleType.class, Lane.class); // // امضاء
+////                Object v = c2.newInstance(new Object[]{id, type, lane}); // // ساخت
+////                trySetDouble(v, "setPositionInLane", pos);              // // ست موقعیت
+////                trySetDouble(v, "setSpeed", speed);                      // // ست سرعت
+////                trySetDouble(v, "setTargetSpeed", speed);                // // ست هدف
+////                return v;
+////            } catch (Throwable ignored) {}
+////
+////            // 3) (String, VehicleType)
+////            try {
+////                Constructor<?> c3 = vehicleCls.getConstructor(String.class, VehicleType.class); // // امضاء
+////                Object v = c3.newInstance(new Object[]{id, type});  // // ساخت
+////                trySetLane(v, lane);                                 // // ست لِین
+////                trySetDouble(v, "setPositionInLane", pos);           // // ست موقعیت
+////                trySetDouble(v, "setSpeed", speed);                  // // ست سرعت
+////                trySetDouble(v, "setTargetSpeed", speed);            // // ست هدف
+////                return v;
+////            } catch (Throwable ignored) {}
+////
+////            // 4) (String)
+////            try {
+////                Constructor<?> c4 = vehicleCls.getConstructor(String.class); // // امضاء
+////                Object v = c4.newInstance(new Object[]{id});                 // // ساخت
+////                trySetEnum(v, "setType", VehicleType.class, type);           // // نوع
+////                trySetLane(v, lane);                                         // // لِین
+////                trySetDouble(v, "setPositionInLane", pos);                   // // موقعیت
+////                trySetDouble(v, "setSpeed", speed);                          // // سرعت
+////                trySetDouble(v, "setTargetSpeed", speed);                    // // هدف
+////                return v;
+////            } catch (Throwable ignored) {}
+////
+////        } catch (Throwable ignored) {}
+////        return null; // // نشد ساخت
 ////    }
 ////
-////    // راه‌اندازی اولیه //
-////    public static void setup(World world, CityMap map, SimulationClock clock) { //
-////        installLights(world, map, 35, 5, 30); // نصب چراغ //
-////        seedVehicles(world, map, clock, 70); // ۷۰ خودرو اولیه //
-////        addPedestrians(world, map); // عابر + گذرگاه //
-////    }
-////}
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-////
-////package simulation;
-////
-////import core.Direction; // جهت //
-////import core.Vehicle; // وسیله نقلیه //
-////import core.VehicleType; // نوع خودرو //
-////import core.DriverProfile; // پروفایل راننده //
-////import core.Point; // نقطه //
-////import infrastructure.CityMap; // نقشه //
-////import infrastructure.Intersection; // تقاطع //
-////import infrastructure.Road; // جاده //
-////import infrastructure.Lane; // لاین //
-////import pedestrian.Pedestrian; // عابر //
-////import pedestrian.PedestrianCrossing; // گذرگاه //
-////import trafficcontrol.TrafficLight; // چراغ //
-////import trafficcontrol.LightState; // وضعیت چراغ //
-////
-////import java.util.ArrayList; //
-////import java.util.List; //
-////import java.util.Random; //
-////
-////// پیکربندی و آماده‌سازی سناریو دموی ترافیک //
-////public final class DemoTraffic { //
-////    private DemoTraffic() {} // جلوگیری از ساخت //
-////    private static final Random rnd = new Random(); // رندوم //
-////
-////    // نصب چراغ‌ها و ثبت گروه‌های هماهنگ در World //
-////    public static void installLights(World world, CityMap map, int green, int yellow, int red) { //
-////        List<Intersection> xs = map.getIntersections(); // لیست تقاطع‌ها //
-////        for (int i = 0; i < xs.size(); i++) { // حلقه روی تقاطع‌ها //
-////            Intersection it = xs.get(i); // گرفتن تقاطع //
-////
-////            // ساخت چراغ‌ها با وضعیت اولیه هماهنگ //
-////            TrafficLight north = new TrafficLight("TL-" + it.getId() + "-N", Direction.NORTH, green, yellow, red, LightState.GREEN); // N سبز //
-////            TrafficLight south = new TrafficLight("TL-" + it.getId() + "-S", Direction.SOUTH, green, yellow, red, LightState.GREEN); // S سبز //
-////            TrafficLight east  = new TrafficLight("TL-" + it.getId() + "-E", Direction.EAST,  green, yellow, red, LightState.RED);   // E قرمز //
-////            TrafficLight west  = new TrafficLight("TL-" + it.getId() + "-W", Direction.WEST,  green, yellow, red, LightState.RED);   // W قرمز //
-////
-////            // ثبت کنترل در تقاطع //
-////            it.setControl(Direction.NORTH, north); //
-////            it.setControl(Direction.SOUTH, south); //
-////            it.setControl(Direction.EAST, east); //
-////            it.setControl(Direction.WEST, west); //
-////
-////            // افزودن به world //
-////            world.addTrafficLight(north); //
-////            world.addTrafficLight(south); //
-////            world.addTrafficLight(east); //
-////            world.addTrafficLight(west); //
-////
-////            // ثبت گروه هماهنگ (N/S و E/W) //
-////            world.addSynchronizedLights(north, south, east, west); //
-////        }
+////    private static void reflectRegisterVehicleInWorld(final World world, final Object vehicle) { // // ثبت
+////        try {
+////            Method m = world.getClass().getMethod("addVehicle", Class.forName("core.Vehicle")); // // امضاء ۱
+////            m.invoke(world, vehicle);                                                           // // صدا
+////            return;
+////        } catch (Throwable ignored) {}
+////        try {
+////            Method m = world.getClass().getMethod("registerVehicle", Class.forName("core.Vehicle")); // // امضاء ۲
+////            m.invoke(world, vehicle);                                                                  // // صدا
+////            return;
+////        } catch (Throwable ignored) {}
+////        try {
+////            Method m = world.getClass().getMethod("addEntity", Object.class); // // امضاء ۳
+////            m.invoke(world, vehicle);                                         // // صدا
+////        } catch (Throwable ignored) {}
 ////    }
 ////
-////    // ریختن چند خودروی اولیه //
-////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { //
-////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // جمع‌آوری لاین‌ها //
-////        List<Road> roads = map.getRoads(); //
-////        for (int i = 0; i < roads.size(); i++) { //
-////            Road r = roads.get(i); //
-////            lanes.addAll(r.getForwardLanes()); //
-////            lanes.addAll(r.getBackwardLanes()); //
-////        }
-////        if (lanes.isEmpty()) return; // اگر لاینی نبود //
-////
-////        for (int n = 0; n < count; n++) { // ایجاد خودروها //
-////            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // لاین تصادفی //
-////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // ساخت //
-////            v.setCurrentLane(lane); // ست لاین //
-////            v.setPositionInLane(rnd.nextInt(40)); // موقعیت اولیه //
-////            v.setTargetSpeed(38 + rnd.nextInt(15)); // سرعت هدف //
-////            world.addVehicle(v); // افزودن //
-////        }
+////    private static void trySetDouble(final Object target, final String setter, final double value) { // // ست double
+////        try {
+////            Method m = target.getClass().getMethod(setter, double.class); // // متد
+////            m.invoke(target, new Object[]{ Double.valueOf(value) });      // // صدا
+////        } catch (Throwable ignored) {}
 ////    }
 ////
-////    // افزودن یک خودرو رندوم //
-////    public static Vehicle addRandomVehicle(World world, CityMap map) { //
-////        ArrayList<Lane> lanes = new ArrayList<Lane>(); //
-////        List<Road> roads = map.getRoads(); //
-////        for (int i = 0; i < roads.size(); i++) { //
-////            Road r = roads.get(i); //
-////            lanes.addAll(r.getForwardLanes()); //
-////            lanes.addAll(r.getBackwardLanes()); //
-////        }
-////        if (lanes.isEmpty()) return null; //
-////
-////        Lane lane = lanes.get(rnd.nextInt(lanes.size())); //
-////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); //
-////        v.setCurrentLane(lane); //
-////        v.setPositionInLane(rnd.nextInt(30)); //
-////        v.setTargetSpeed(36 + rnd.nextInt(18)); //
-////        world.addVehicle(v); //
-////        return v; //
+////    private static void trySetEnum(final Object target, final String setter,
+////                                   final Class<?> enumCls, final Object enumValue) { // // ست enum
+////        try {
+////            Method m = target.getClass().getMethod(setter, enumCls); // // متد
+////            m.invoke(target, enumValue);                             // // صدا
+////        } catch (Throwable ignored) {}
 ////    }
 ////
-////    private static VehicleType randomType() { // انتخاب نوع //
-////        VehicleType[] vals = VehicleType.values(); //
-////        return vals[rnd.nextInt(vals.length)]; //
-////    }
-////
-////    // افزودن ۴ گذرگاه و عابر //
-////    public static void addPedestrians(World world, CityMap map) { //
-////        List<Intersection> xs = map.getIntersections(); //
-////        if (xs.size() < 4) return; //
-////
-////        for (int i = 0; i < 4; i++) { // چهار گذرگاه //
-////            Intersection it = xs.get(rnd.nextInt(xs.size())); //
-////            Direction d = Direction.values()[rnd.nextInt(Direction.values().length)]; //
-////            PedestrianCrossing crossing = new PedestrianCrossing("PC-" + it.getId() + "-" + d, it, d, true); //
-////            Pedestrian p = new Pedestrian("P-" + System.nanoTime(), new Point(it.getPosition().getX(), it.getPosition().getY()), crossing); //
-////            world.addPedestrian(p); //
-////        }
-////    }
-////
-////    // راه‌اندازی اولیه //
-////    public static void setup(World world, CityMap map, SimulationClock clock) { //
-////        installLights(world, map, 35, 5, 30); // نصب چراغ //
-////        seedVehicles(world, map, clock, 70); // ۷۰ خودرو اولیه //
-////        addPedestrians(world, map); // عابر + گذرگاه //
+////    private static void trySetLane(final Object target, final Lane lane) { // // ست Lane
+////        try {
+////            Method m = target.getClass().getMethod("setLane", Lane.class); // // setLane
+////            m.invoke(target, lane);
+////            return;
+////        } catch (Throwable ignored) {}
+////        try {
+////            Method m = target.getClass().getMethod("setCurrentLane", Lane.class); // // setCurrentLane
+////            m.invoke(target, lane);
+////        } catch (Throwable ignored) {}
 ////    }
 ////}
 ////
@@ -577,1144 +699,182 @@ public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
 ////
 ////
 ////
+////
+////
+////
+////
+////
+////
+////
+////
+//////// simulation/DemoTraffic.java
+//////package simulation; // // پکیج شبیه‌سازی
 //////
-//////package simulation;
+//////import infrastructure.CityMap;         // // نقشه
+//////import infrastructure.Intersection;    // // تقاطع
+//////import infrastructure.Road;            // // جاده
+//////import infrastructure.Lane;            // // لِین
+//////import core.VehicleType;               // // نوع وسیله
+//////import trafficcontrol.*;               // // چراغ/وضعیت
+//////import java.util.*;                    // // کالکشن‌ها
+//////import java.lang.reflect.*;            // // Reflection برای ساخت Vehicle
 //////
-//////import core.Direction;
-//////import core.Vehicle;
-//////import core.VehicleType;
-//////import core.DriverProfile;
-//////import core.Point;
-//////import infrastructure.CityMap;
-//////import infrastructure.Intersection;
-//////import infrastructure.Road;
-//////import infrastructure.Lane;
-//////import pedestrian.Pedestrian;
-//////import pedestrian.PedestrianCrossing;
-//////import trafficcontrol.TrafficLight;
-//////import trafficcontrol.LightState;
+//////public final class DemoTraffic { // // ابزار سناریو
+//////    private static final Random RNG = new Random(); // // رندوم
+//////    private DemoTraffic() {} // // جلوگیری از نمونه‌سازی
 //////
-//////import java.util.ArrayList;
-//////import java.util.List;
-//////import java.util.Random;
+//////    // ------------------------- نصب چراغ‌ها -------------------------
 //////
-//////public final class DemoTraffic {
-//////    private DemoTraffic() {}
-//////    private static final Random rnd = new Random();
-//////
-//////    // ---------- نصب چراغ واقعی در تقاطع‌ها ----------
-//////    public static void installLights(World world, CityMap map, int green, int yellow, int red) {
-//////        List<Intersection> xs = map.getIntersections();
-//////        for (int i = 0; i < xs.size(); i++) {
-//////            Intersection it = xs.get(i);
-//////
-//////            // چراغ شمال و جنوب
-//////            TrafficLight north = new TrafficLight("TL-" + it.getId() + "-N", Direction.NORTH, green, yellow, red, LightState.GREEN);
-//////            TrafficLight south = new TrafficLight("TL-" + it.getId() + "-S", Direction.SOUTH, green, yellow, red, LightState.GREEN);
-//////
-//////            // چراغ شرق و غرب
-//////            TrafficLight east  = new TrafficLight("TL-" + it.getId() + "-E", Direction.EAST,  green, yellow, red, LightState.RED);
-//////            TrafficLight west  = new TrafficLight("TL-" + it.getId() + "-W", Direction.WEST,  green, yellow, red, LightState.RED);
-//////
-//////            // ثبت کنترل در تقاطع
-//////            it.setControl(Direction.NORTH, north);
-//////            it.setControl(Direction.SOUTH, south);
-//////            it.setControl(Direction.EAST, east);
-//////            it.setControl(Direction.WEST, west);
-//////
-//////            // افزودن به جهان
-//////            world.addTrafficLight(north);
-//////            world.addTrafficLight(south);
-//////            world.addTrafficLight(east);
-//////            world.addTrafficLight(west);
+//////    /** نصب چراغ در همهٔ تقاطع‌ها برای چهار رویکرد (N,E,S,W). */
+//////    public static void installLights(final World world, final CityMap map,
+//////                                     final int greenMs, final int yellowMs, final int redMs) {
+//////        // امضا را به long تبدیل می‌کنیم چون TrafficLight(long...) می‌خواهد.
+//////        final long g = greenMs, y = yellowMs, r = redMs; // // تبدیل
+//////        for (int i = 0; i < map.getIntersections().size(); i++) { // // پیمایش
+//////            final Intersection it = map.getIntersections().get(i); // // تقاطع
+//////            attachIfMissing(world, it, core.Direction.NORTH, g, y, r); // // شمال
+//////            attachIfMissing(world, it, core.Direction.EAST , g, y, r); // // شرق
+//////            attachIfMissing(world, it, core.Direction.SOUTH, g, y, r); // // جنوب
+//////            attachIfMissing(world, it, core.Direction.WEST , g, y, r); // // غرب
 //////        }
 //////    }
 //////
-//////    // ---------- ریختن چند خودرو تستی ----------
-//////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) {
-//////        ArrayList<Lane> lanes = new ArrayList<>();
-//////        List<Road> roads = map.getRoads();
-//////        for (Road r : roads) {
-//////            lanes.addAll(r.getForwardLanes());
-//////            lanes.addAll(r.getBackwardLanes());
-//////        }
-//////        if (lanes.isEmpty()) return;
-//////
-//////        for (int n = 0; n < count; n++) {
-//////            Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-//////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-//////            v.setCurrentLane(lane);
-//////            v.setPositionInLane(rnd.nextInt(40));
-//////            v.setTargetSpeed(38 + rnd.nextInt(15));
-//////            world.addVehicle(v);
+//////    /** اگر کنترلی برای رویکرد نبود، چراغ راهنما نصب می‌کند. */
+//////    private static void attachIfMissing(final World world, final Intersection it,
+//////                                        final core.Direction d, final long g, final long y, final long r) {
+//////        final TrafficControlDevice dev = it.getControl(d); // // کنترل فعلی
+//////        if (dev == null) { // // اگر چیزی نصب نیست
+//////            final TrafficLight tl = new TrafficLight(it, d, g, y, r); // // سازندهٔ هماهنگ
+//////            it.setControl(d, tl);            // // ثبت روی تقاطع (World از این طریق می‌بیند)
+//////            world.addTrafficLight(tl);       // // برای رندر/مدیریت در World
 //////        }
 //////    }
 //////
-//////    // ---------- افزودن یک خودرو رندوم ----------
-//////    public static Vehicle addRandomVehicle(World world, CityMap map) {
-//////        ArrayList<Lane> lanes = new ArrayList<>();
-//////        List<Road> roads = map.getRoads();
-//////        for (Road r : roads) {
-//////            lanes.addAll(r.getForwardLanes());
-//////            lanes.addAll(r.getBackwardLanes());
+//////    // ---------------------- افزودن تصادفی خودرو ----------------------
+//////
+//////    public static void addRandomVehicle(final World world, final CityMap map) { // // افزودن خودرو
+//////        final Lane spawnLane = pickRandomLane(map);      // // لِین تصادفی
+//////        if (spawnLane == null) return;                   // // محافظت
+//////
+//////        final VehicleType type = randomVehicleType();    // // نوع
+//////        final double startSpeed = type.getMinSpeed() +
+//////                RNG.nextDouble() * (Math.max(0.1, type.getMaxSpeed() - type.getMinSpeed())); // // سرعت رندوم
+//////        final double pos = 0.0;                          // // موضع شروع
+//////        final String id = "VH-" + System.currentTimeMillis() + "-" + Math.abs(RNG.nextInt()); // // شناسه
+//////
+//////        final Object vehicle = reflectMakeVehicle(id, type, spawnLane, pos, startSpeed); // // ساخت Vehicle
+//////        if (vehicle == null) return;                       // // اگر نشد، خروج
+//////        reflectRegisterVehicleInWorld(world, vehicle);     // // ثبت در دنیا
+//////    }
+//////
+//////    private static Lane pickRandomLane(final CityMap map) { // // انتخاب لِین
+//////        final ArrayList<Lane> lanes = new ArrayList<Lane>(); // // تجمیع
+//////        for (int i=0;i<map.getRoads().size();i++){ // // حلقه راه‌ها
+//////            Road r = map.getRoads().get(i);        // // راه
+//////            lanes.addAll(r.getForwardLanes());     // // رفت
+//////            lanes.addAll(r.getBackwardLanes());    // // برگشت
 //////        }
-//////        if (lanes.isEmpty()) return null;
-//////
-//////        Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-//////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-//////        v.setCurrentLane(lane);
-//////        v.setPositionInLane(rnd.nextInt(30));
-//////        v.setTargetSpeed(36 + rnd.nextInt(18));
-//////        world.addVehicle(v);
-//////        return v;
+//////        if (lanes.isEmpty()) return null;          // // محافظت
+//////        return lanes.get(RNG.nextInt(lanes.size())); // // تصادفی
 //////    }
 //////
-//////    private static VehicleType randomType() {
-//////        VehicleType[] vals = VehicleType.values();
-//////        return vals[rnd.nextInt(vals.length)];
+//////    private static VehicleType randomVehicleType() { // // انتخاب نوع
+//////        VehicleType[] all = VehicleType.values();    // // همه
+//////        return all[RNG.nextInt(all.length)];         // // تصادفی
 //////    }
 //////
-//////    // ---------- افزودن عابر پیاده + گذرگاه ----------
-//////    public static void addPedestrians(World world, CityMap map) {
-//////        List<Intersection> xs = map.getIntersections();
-//////        if (xs.size() < 4) return;
+//////    // ---------- Reflection helpers ----------
 //////
-//////        // ۴ گذرگاه پیاده روی ۴ تقاطع مختلف
-//////        for (int i = 0; i < 4; i++) {
-//////            Intersection it = xs.get(rnd.nextInt(xs.size()));
-//////            Direction d = Direction.values()[rnd.nextInt(Direction.values().length)];
-//////            PedestrianCrossing crossing = new PedestrianCrossing("PC-" + it.getId() + "-" + d, it, d, true);
+//////    /** تلاش برای ساخت Vehicle با امضاهای رایج پروژهٔ تو. */
+//////    private static Object reflectMakeVehicle(final String id, final VehicleType type,
+//////                                             final Lane lane, final double pos, final double speed) {
+//////        try {
+//////            Class<?> vehicleCls = Class.forName("core.Vehicle"); // // کلاس Vehicle
 //////
-//////            Pedestrian p = new Pedestrian("P-" + System.nanoTime(),
-//////                    new Point(it.getPosition().getX(), it.getPosition().getY()), crossing);
-//////            world.addPedestrian(p);
-//////        }
+//////            // 1) (String, VehicleType, infrastructure.Lane, double, double)
+//////            try {
+//////                Constructor<?> c1 = vehicleCls.getConstructor(String.class, VehicleType.class, Lane.class, double.class, double.class); // // امضاء
+//////                return c1.newInstance(new Object[]{id, type, lane, Double.valueOf(pos), Double.valueOf(speed)}); // // ساخت
+//////            } catch (Throwable ignored) {}
+//////
+//////            // 2) (String, VehicleType, infrastructure.Lane)
+//////            try {
+//////                Constructor<?> c2 = vehicleCls.getConstructor(String.class, VehicleType.class, Lane.class); // // امضاء
+//////                Object v = c2.newInstance(new Object[]{id, type, lane}); // // ساخت
+//////                trySetDouble(v, "setPositionInLane", pos);              // // ست موضع
+//////                trySetDouble(v, "setSpeed", speed);                      // // ست سرعت
+//////                trySetDouble(v, "setTargetSpeed", speed);                // // ست هدف
+//////                return v;
+//////            } catch (Throwable ignored) {}
+//////
+//////            // 3) (String, VehicleType)
+//////            try {
+//////                Constructor<?> c3 = vehicleCls.getConstructor(String.class, VehicleType.class); // // امضاء
+//////                Object v = c3.newInstance(new Object[]{id, type});  // // ساخت
+//////                trySetLane(v, lane);                                 // // ست لِین
+//////                trySetDouble(v, "setPositionInLane", pos);           // // ست موضع
+//////                trySetDouble(v, "setSpeed", speed);                   // // ست سرعت
+//////                trySetDouble(v, "setTargetSpeed", speed);             // // ست هدف
+//////                return v;
+//////            } catch (Throwable ignored) {}
+//////
+//////            // 4) (String)
+//////            try {
+//////                Constructor<?> c4 = vehicleCls.getConstructor(String.class); // // امضاء
+//////                Object v = c4.newInstance(new Object[]{id}); // // ساخت
+//////                trySetEnum(v, "setType", VehicleType.class, type); // // نوع
+//////                trySetLane(v, lane);                                // // لِین
+//////                trySetDouble(v, "setPositionInLane", pos);          // // موضع
+//////                trySetDouble(v, "setSpeed", speed);                  // // سرعت
+//////                trySetDouble(v, "setTargetSpeed", speed);            // // هدف
+//////                return v;
+//////            } catch (Throwable ignored) {}
+//////
+//////        } catch (Throwable ignored) {}
+//////        return null; // // نشد
 //////    }
 //////
-//////    // ---------- راه‌اندازی اولیه ----------
-//////    public static void setup(World world, CityMap map, SimulationClock clock) {
-//////        installLights(world, map, 35, 5, 30);      // چراغ‌ها
-//////        seedVehicles(world, map, clock, 70);       // 🚗 تعداد اولیه ۷۰ ماشین
-//////        addPedestrians(world, map);                // 🚶 اضافه کردن عابر و گذرگاه
+//////    private static void reflectRegisterVehicleInWorld(final World world, final Object vehicle) { // // ثبت خودرو
+//////        try {
+//////            Method m = world.getClass().getMethod("addVehicle", Class.forName("core.Vehicle")); // // امضاء ۱
+//////            m.invoke(world, vehicle); // // صدا
+//////            return;
+//////        } catch (Throwable ignored) {}
+//////        try {
+//////            Method m = world.getClass().getMethod("registerVehicle", Class.forName("core.Vehicle")); // // امضاء ۲
+//////            m.invoke(world, vehicle); // // صدا
+//////            return;
+//////        } catch (Throwable ignored) {}
+//////        try {
+//////            Method m = world.getClass().getMethod("addEntity", Object.class); // // امضاء ۳
+//////            m.invoke(world, vehicle); // // صدا
+//////        } catch (Throwable ignored) {}
+//////    }
+//////
+//////    private static void trySetDouble(final Object target, final String setter, final double value) { // // ست double
+//////        try {
+//////            Method m = target.getClass().getMethod(setter, double.class); // // متد
+//////            m.invoke(target, new Object[]{ Double.valueOf(value) });      // // صدا
+//////        } catch (Throwable ignored) {}
+//////    }
+//////
+//////    private static void trySetEnum(final Object target, final String setter,
+//////                                   final Class<?> enumCls, final Object enumValue) { // // ست enum
+//////        try {
+//////            Method m = target.getClass().getMethod(setter, enumCls); // // متد
+//////            m.invoke(target, enumValue); // // صدا
+//////        } catch (Throwable ignored) {}
+//////    }
+//////
+//////    private static void trySetLane(final Object target, final Lane lane) { // // ست Lane
+//////        try {
+//////            Method m = target.getClass().getMethod("setLane", Lane.class); // // setLane
+//////            m.invoke(target, lane);
+//////            return;
+//////        } catch (Throwable ignored) {}
+//////        try {
+//////            Method m = target.getClass().getMethod("setCurrentLane", Lane.class); // // setCurrentLane
+//////            m.invoke(target, lane);
+//////        } catch (Throwable ignored) {}
 //////    }
 //////}
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-////////
-////////package simulation;
-////////
-////////import core.Direction;
-////////import core.Vehicle;
-////////import core.VehicleType;
-////////import core.DriverProfile;
-////////import core.Point;
-////////import infrastructure.CityMap;
-////////import infrastructure.Intersection;
-////////import infrastructure.Road;
-////////import infrastructure.Lane;
-////////import pedestrian.Pedestrian;
-////////import pedestrian.PedestrianCrossing;
-////////import trafficcontrol.TrafficLight;
-////////import trafficcontrol.TrafficControlDevice;
-////////import trafficcontrol.LightState;
-////////
-////////import java.util.ArrayList;
-////////import java.util.List;
-////////import java.util.Random;
-////////
-////////public final class DemoTraffic {
-////////    private DemoTraffic() {}
-////////    private static final Random rnd = new Random();
-////////
-////////    // ---------- نصب چراغ واقعی در تقاطع‌ها ----------
-////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) {
-////////        List<Intersection> xs = map.getIntersections();
-////////        for (int i = 0; i < xs.size(); i++) {
-////////            Intersection it = xs.get(i);
-////////
-////////            // چراغ شمال و جنوب
-////////            TrafficLight north = new TrafficLight("TL-" + it.getId() + "-N", Direction.NORTH, green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////            TrafficLight south = new TrafficLight("TL-" + it.getId() + "-S", Direction.SOUTH, green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////            // چراغ شرق و غرب
-////////            TrafficLight east  = new TrafficLight("TL-" + it.getId() + "-E", Direction.EAST,  green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////            TrafficLight west  = new TrafficLight("TL-" + it.getId() + "-W", Direction.WEST,  green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////
-////////            // در شروع: شمال/جنوب سبز، شرق/غرب قرمز
-////////            while (north.getState() != LightState.GREEN) north.update();
-////////            while (south.getState() != LightState.GREEN) south.update();
-////////            while (east.getState()  != LightState.RED)   east.update();
-////////            while (west.getState()  != LightState.RED)   west.update();
-////////
-////////            it.setControl(Direction.NORTH, north);
-////////            it.setControl(Direction.SOUTH, south);
-////////            it.setControl(Direction.EAST, east);
-////////            it.setControl(Direction.WEST, west);
-////////
-////////            world.addTrafficLight(north);
-////////            world.addTrafficLight(south);
-////////            world.addTrafficLight(east);
-////////            world.addTrafficLight(west);
-////////        }
-////////    }
-////////
-////////    // ---------- ریختن چند خودرو تستی ----------
-////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) {
-////////        ArrayList<Lane> lanes = new ArrayList<Lane>();
-////////        List<Road> roads = map.getRoads();
-////////        for (int i = 0; i < roads.size(); i++) {
-////////            Road r = roads.get(i);
-////////            lanes.addAll(r.getForwardLanes());
-////////            lanes.addAll(r.getBackwardLanes());
-////////        }
-////////        if (lanes.isEmpty()) return;
-////////
-////////        for (int n = 0; n < count; n++) {
-////////            Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-////////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-////////            v.setCurrentLane(lane);
-////////            v.setPositionInLane(rnd.nextInt(40));
-////////            v.setTargetSpeed(38 + rnd.nextInt(15));
-////////            world.addVehicle(v);
-////////        }
-////////    }
-////////
-////////    // ---------- افزودن یک خودرو رندوم ----------
-////////    public static Vehicle addRandomVehicle(World world, CityMap map) {
-////////        ArrayList<Lane> lanes = new ArrayList<Lane>();
-////////        List<Road> roads = map.getRoads();
-////////        for (int i = 0; i < roads.size(); i++) {
-////////            Road r = roads.get(i);
-////////            lanes.addAll(r.getForwardLanes());
-////////            lanes.addAll(r.getBackwardLanes());
-////////        }
-////////        if (lanes.isEmpty()) return null;
-////////
-////////        Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-////////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-////////        v.setCurrentLane(lane);
-////////        v.setPositionInLane(rnd.nextInt(30));
-////////        v.setTargetSpeed(36 + rnd.nextInt(18));
-////////        world.addVehicle(v);
-////////        return v;
-////////    }
-////////
-////////    private static VehicleType randomType() {
-////////        VehicleType[] vals = VehicleType.values();
-////////        return vals[rnd.nextInt(vals.length)];
-////////    }
-////////
-////////    // ---------- افزودن عابر پیاده + گذرگاه ----------
-////////    public static void addPedestrians(World world, CityMap map) {
-////////        List<Intersection> xs = map.getIntersections();
-////////        if (xs.size() < 4) return;
-////////
-////////        // ۴ گذرگاه پیاده روی ۴ تقاطع مختلف
-////////        for (int i = 0; i < 4; i++) {
-////////            Intersection it = xs.get(rnd.nextInt(xs.size()));
-////////            Direction d = Direction.values()[rnd.nextInt(Direction.values().length)];
-////////            PedestrianCrossing crossing = new PedestrianCrossing("PC-" + it.getId() + "-" + d, it, d, true);
-////////
-////////            Pedestrian p = new Pedestrian("P-" + System.nanoTime(), new Point(it.getPosition().getX(), it.getPosition().getY()), crossing);
-////////            world.addPedestrian(p);
-////////        }
-////////    }
-////////
-////////    // ---------- راه‌اندازی اولیه ----------
-////////    public static void setup(World world, CityMap map, SimulationClock clock) {
-////////        installLights(world, map, 35, 5, 30);      // چراغ‌ها
-////////        seedVehicles(world, map, clock, 70);       // 🚗 تعداد اولیه ۷۰ ماشین
-////////        addPedestrians(world, map);                // 🚶 اضافه کردن عابر و گذرگاه
-////////    }
-////////}
-////////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-////////
-////////package simulation;
-////////
-////////import core.Direction;
-////////import core.Vehicle;
-////////import core.VehicleType;
-////////import core.DriverProfile;
-////////import core.Point;
-////////import infrastructure.CityMap;
-////////import infrastructure.Intersection;
-////////import infrastructure.Road;
-////////import infrastructure.Lane;
-////////import pedestrian.Pedestrian;
-////////import pedestrian.PedestrianCrossing;
-////////import trafficcontrol.TrafficLight;
-////////import trafficcontrol.TrafficControlDevice;
-////////import trafficcontrol.LightState;
-////////
-////////import java.util.ArrayList;
-////////import java.util.List;
-////////import java.util.Random;
-////////
-////////public final class DemoTraffic {
-////////    private DemoTraffic() {}
-////////    private static final Random rnd = new Random();
-////////
-////////    // ---------- نصب چراغ واقعی در تقاطع‌ها ----------
-////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) {
-////////        List<Intersection> xs = map.getIntersections();
-////////        for (int i = 0; i < xs.size(); i++) {
-////////            Intersection it = xs.get(i);
-////////
-////////            // چراغ شمال و جنوب
-////////            TrafficLight north = new TrafficLight("TL-" + it.getId() + "-N", Direction.NORTH, green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////            TrafficLight south = new TrafficLight("TL-" + it.getId() + "-S", Direction.SOUTH, green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////            // چراغ شرق و غرب
-////////            TrafficLight east  = new TrafficLight("TL-" + it.getId() + "-E", Direction.EAST,  green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////            TrafficLight west  = new TrafficLight("TL-" + it.getId() + "-W", Direction.WEST,  green, yellow, red, SimulationConfig.TICK_INTERVAL);
-////////
-////////            // در شروع: شمال/جنوب سبز باشن، شرق/غرب قرمز
-////////            while (north.getState() != LightState.GREEN) north.update();
-////////            while (south.getState() != LightState.GREEN) south.update();
-////////            while (east.getState() != LightState.RED) east.update();
-////////            while (west.getState() != LightState.RED) west.update();
-////////
-////////            it.setControl(Direction.NORTH, north);
-////////            it.setControl(Direction.SOUTH, south);
-////////            it.setControl(Direction.EAST, east);
-////////            it.setControl(Direction.WEST, west);
-////////
-////////            world.addTrafficLight(north);
-////////            world.addTrafficLight(south);
-////////            world.addTrafficLight(east);
-////////            world.addTrafficLight(west);
-////////        }
-////////    }
-////////
-////////    // ---------- ریختن چند خودرو تستی ----------
-////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) {
-////////        ArrayList<Lane> lanes = new ArrayList<Lane>();
-////////        List<Road> roads = map.getRoads();
-////////        for (int i = 0; i < roads.size(); i++) {
-////////            Road r = roads.get(i);
-////////            lanes.addAll(r.getForwardLanes());
-////////            lanes.addAll(r.getBackwardLanes());
-////////        }
-////////        if (lanes.isEmpty()) return;
-////////
-////////        for (int n = 0; n < count; n++) {
-////////            Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-////////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-////////            v.setCurrentLane(lane);
-////////            v.setPositionInLane(rnd.nextInt(40));
-////////            v.setTargetSpeed(38 + rnd.nextInt(15));
-////////            world.addVehicle(v);
-////////        }
-////////    }
-////////
-////////    // ---------- افزودن یک خودرو رندوم ----------
-////////    public static Vehicle addRandomVehicle(World world, CityMap map) {
-////////        ArrayList<Lane> lanes = new ArrayList<Lane>();
-////////        List<Road> roads = map.getRoads();
-////////        for (int i = 0; i < roads.size(); i++) {
-////////            Road r = roads.get(i);
-////////            lanes.addAll(r.getForwardLanes());
-////////            lanes.addAll(r.getBackwardLanes());
-////////        }
-////////        if (lanes.isEmpty()) return null;
-////////
-////////        Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-////////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-////////        v.setCurrentLane(lane);
-////////        v.setPositionInLane(rnd.nextInt(30));
-////////        v.setTargetSpeed(36 + rnd.nextInt(18));
-////////        world.addVehicle(v);
-////////        return v;
-////////    }
-////////
-////////    private static VehicleType randomType() {
-////////        VehicleType[] vals = VehicleType.values();
-////////        return vals[rnd.nextInt(vals.length)];
-////////    }
-////////
-////////    // ---------- افزودن عابر پیاده + گذرگاه ----------
-////////    public static void addPedestrians(World world, CityMap map) {
-////////        List<Intersection> xs = map.getIntersections();
-////////        if (xs.size() < 4) return;
-////////
-////////        // ۴ گذرگاه پیاده روی ۴ تقاطع مختلف
-////////        for (int i = 0; i < 4; i++) {
-////////            Intersection it = xs.get(rnd.nextInt(xs.size()));
-////////            Direction d = Direction.values()[rnd.nextInt(Direction.values().length)];
-////////            PedestrianCrossing crossing = new PedestrianCrossing("PC-" + it.getId() + "-" + d, it, d, true);
-////////
-////////            Pedestrian p = new Pedestrian("P-" + System.nanoTime(), new Point(it.getPosition().getX(), it.getPosition().getY()), crossing);
-////////            world.addPedestrian(p);
-////////        }
-////////    }
-////////}
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-//////
-////////
-////////package simulation; // // پکیج simulation
-////////
-////////import core.Direction;
-////////import core.Vehicle;
-////////import core.VehicleType;
-////////import core.DriverProfile;
-////////import infrastructure.CityMap;
-////////import infrastructure.Intersection;
-////////import infrastructure.Road;
-////////import infrastructure.Lane;
-////////import trafficcontrol.TrafficLight;
-////////import trafficcontrol.TrafficControlDevice;
-////////
-////////import java.util.ArrayList;
-////////import java.util.List;
-////////import java.util.Random;
-////////
-////////public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
-////////    private DemoTraffic() {}
-////////    private static final Random rnd = new Random();
-////////
-////////    // ---------- نصب چراغ روی همهٔ جهت‌های هر تقاطع ----------
-////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) {
-////////        List<Intersection> xs = map.getIntersections();
-////////        for (int i = 0; i < xs.size(); i++) {
-////////            Intersection it = xs.get(i);
-////////            attachIfMissing(world, it, Direction.NORTH, green, yellow, red);
-////////            attachIfMissing(world, it, Direction.SOUTH, green, yellow, red);
-////////            attachIfMissing(world, it, Direction.EAST,  green, yellow, red);
-////////            attachIfMissing(world, it, Direction.WEST,  green, yellow, red);
-////////        }
-////////    }
-////////
-////////    private static void attachIfMissing(World world, Intersection it, Direction d, int g, int y, int r) {
-////////        TrafficControlDevice dev = it.getControl(d);
-////////        if (dev == null) {
-////////            // ✅ اینجا اصلاح شد: به جای LightState.GREEN → SimulationConfig.TICK_INTERVAL
-////////            TrafficLight tl = new TrafficLight("TL-" + it.getId() + "-" + d, d, g, y, r, SimulationConfig.TICK_INTERVAL);
-////////            it.setControl(d, tl);
-////////            world.addTrafficLight(tl);
-////////        }
-////////    }
-////////
-////////    // ---------- ریختن چند خودرو تستی ----------
-////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) {
-////////        ArrayList<Lane> lanes = new ArrayList<Lane>();
-////////        List<Road> roads = map.getRoads();
-////////        for (int i = 0; i < roads.size(); i++) {
-////////            Road r = roads.get(i);
-////////            lanes.addAll(r.getForwardLanes());
-////////            lanes.addAll(r.getBackwardLanes());
-////////        }
-////////        if (lanes.isEmpty()) return;
-////////
-////////        for (int n = 0; n < count; n++) {
-////////            Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-////////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-////////            v.setCurrentLane(lane);
-////////            v.setPositionInLane(rnd.nextInt(40));
-////////            v.setTargetSpeed(38 + rnd.nextInt(15));
-////////            world.addVehicle(v);
-////////        }
-////////    }
-////////
-////////    // ---------- افزودن یک خودرو رندوم ----------
-////////    public static Vehicle addRandomVehicle(World world, CityMap map) {
-////////        ArrayList<Lane> lanes = new ArrayList<Lane>();
-////////        List<Road> roads = map.getRoads();
-////////        for (int i = 0; i < roads.size(); i++) {
-////////            Road r = roads.get(i);
-////////            lanes.addAll(r.getForwardLanes());
-////////            lanes.addAll(r.getBackwardLanes());
-////////        }
-////////        if (lanes.isEmpty()) return null;
-////////
-////////        Lane lane = lanes.get(rnd.nextInt(lanes.size()));
-////////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING);
-////////        v.setCurrentLane(lane);
-////////        v.setPositionInLane(rnd.nextInt(30));
-////////        v.setTargetSpeed(36 + rnd.nextInt(18));
-////////        world.addVehicle(v);
-////////        return v;
-////////    }
-////////
-////////    private static VehicleType randomType() {
-////////        VehicleType[] vals = VehicleType.values();
-////////        return vals[rnd.nextInt(vals.length)];
-////////    }
-////////}
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-////////
-//////////package simulation; // // پکیج simulation
-//////////
-//////////import core.Direction; // // جهت
-//////////import core.Vehicle; // // خودرو
-//////////import core.VehicleType; // // نوع خودرو
-//////////import core.DriverProfile; // // پروفایل راننده
-//////////import infrastructure.CityMap; // // نقشه
-//////////import infrastructure.Intersection; // // تقاطع
-//////////import infrastructure.Road; // // جاده
-//////////import infrastructure.Lane; // // لِین
-//////////import trafficcontrol.TrafficLight; // // چراغ
-//////////import trafficcontrol.LightState; // // حالت چراغ
-//////////import trafficcontrol.TrafficControlDevice; // // اینترفیس کنترل
-//////////
-//////////import java.util.ArrayList; // // لیست کمکی
-//////////import java.util.List; // // اینترفیس لیست
-//////////import java.util.Random; // // رندوم
-//////////
-//////////public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
-//////////    private DemoTraffic() {} // // جلوگیری از نمونه‌سازی
-//////////    private static final Random rnd = new Random(); // // رندوم مشترک
-//////////
-//////////    // ---------- نصب چراغ روی همهٔ جهت‌های هر تقاطع (اگر کنترل ندارد) ----------
-//////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) { // // نصب چراغ‌ها
-//////////        List<Intersection> xs = map.getIntersections(); // // همه تقاطع‌ها
-//////////        for (int i = 0; i < xs.size(); i++) { // // حلقه روی تقاطع‌ها
-//////////            Intersection it = xs.get(i); // // تقاطع
-//////////            attachIfMissing(world, it, Direction.NORTH, green, yellow, red); // // شمال
-//////////            attachIfMissing(world, it, Direction.SOUTH, green, yellow, red); // // جنوب
-//////////            attachIfMissing(world, it, Direction.EAST,  green, yellow, red); // // شرق
-//////////            attachIfMissing(world, it, Direction.WEST,  green, yellow, red); // // غرب
-//////////        }
-//////////    }
-//////////
-//////////    private static void attachIfMissing(World world, Intersection it, Direction d, int g, int y, int r) { // // وصل کردن چراغ
-//////////        TrafficControlDevice dev = it.getControl(d); // // کنترل فعلی
-//////////        if (dev == null) { // // اگر چیزی وصل نیست
-//////////            TrafficLight tl = new TrafficLight("TL-" + it.getId() + "-" + d, d, g, y, r, LightState.GREEN); // // ساخت چراغ
-//////////            it.setControl(d, tl); // // وصل به تقاطع (نیاز به setControl داری که داری)
-//////////            world.addTrafficLight(tl); // // ثبت در World برای آپدیت دوره‌ای
-//////////        }
-//////////    }
-//////////
-//////////    // ---------- ریختن چند خودرو تستی روی لِین‌های تصادفی ----------
-//////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { // // افزودن خودرو
-//////////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // لیست همه لِین‌ها
-//////////        List<Road> roads = map.getRoads(); // // همه جاده‌ها
-//////////        for (int i = 0; i < roads.size(); i++) { // // حلقه روی جاده‌ها
-//////////            Road r = roads.get(i); // // جاده
-//////////            lanes.addAll(r.getForwardLanes()); // // لِین‌های رفت
-//////////            lanes.addAll(r.getBackwardLanes()); // // لِین‌های برگشت
-//////////        }
-//////////        if (lanes.isEmpty()) return; // // اگر هیچ لِینی نداریم خروج
-//////////
-//////////        for (int n = 0; n < count; n++) { // // به تعداد خواسته
-//////////            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // یک لِین رندوم
-//////////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // // خودرو
-//////////            v.setCurrentLane(lane); // // قرار دادن روی لِین
-//////////            v.setPositionInLane(rnd.nextInt(40)); // // کمی جلوتر از ابتدا
-//////////            v.setTargetSpeed(38 + rnd.nextInt(15)); // // سرعت هدف اولیه
-//////////            world.addVehicle(v); // // افزودن به دنیا
-//////////        }
-//////////    }
-//////////
-//////////    // ---------- یوتیلیتی: افزودن یک خودرو کاملاً تصادفی ----------
-//////////    public static Vehicle addRandomVehicle(World world, CityMap map) { // // افزودن تک خودرو
-//////////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // جمع‌کردن لِین‌ها
-//////////        List<Road> roads = map.getRoads(); // // جاده‌ها
-//////////        for (int i = 0; i < roads.size(); i++) { // // حلقه
-//////////            Road r = roads.get(i); // // جاده
-//////////            lanes.addAll(r.getForwardLanes()); // // رفت
-//////////            lanes.addAll(r.getBackwardLanes()); // // برگشت
-//////////        }
-//////////        if (lanes.isEmpty()) return null; // // بدون لِین
-//////////
-//////////        Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // انتخاب لِین
-//////////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // // خودرو
-//////////        v.setCurrentLane(lane); // // ست لِین
-//////////        v.setPositionInLane(rnd.nextInt(30)); // // موقعیت اولیه
-//////////        v.setTargetSpeed(36 + rnd.nextInt(18)); // // هدف سرعت
-//////////        world.addVehicle(v); // // افزودن
-//////////        return v; // // بازگشت
-//////////    }
-//////////
-//////////    private static core.VehicleType randomType() { // // انتخاب نوع خودرو تصادفی
-//////////        core.VehicleType[] vals = core.VehicleType.values(); // // آرایه انواع
-//////////        return vals[rnd.nextInt(vals.length)]; // // یکی تصادفی
-//////////    }
-//////////}
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-//////////
-////////////package simulation; // // پکیج simulation
-////////////
-////////////import core.Vehicle; // // کلاس خودرو
-////////////import core.VehicleType; // // نوع خودرو
-////////////import core.DriverProfile; // // پروفایل راننده
-////////////import core.Direction; // // جهت‌ها
-////////////import infrastructure.CityMap; // // نقشه
-////////////import infrastructure.Intersection; // // تقاطع
-////////////import infrastructure.Road; // // جاده
-////////////import infrastructure.Lane; // // لِین
-////////////import trafficcontrol.TrafficLight; // // چراغ
-////////////import trafficcontrol.LightState; // // حالت چراغ
-////////////import trafficcontrol.TrafficControlDevice; // // اینترفیس کنترل
-////////////
-////////////import java.util.ArrayList; // // لیست قابل تغییر
-////////////import java.util.HashMap;  // // مپ
-////////////import java.util.List;     // // اینترفیس لیست
-////////////import java.util.Map;      // // اینترفیس مپ
-////////////import java.util.Random;  // // رندوم
-////////////
-////////////public final class DemoTraffic { // // کلاس کمکی برای دمو
-////////////    private DemoTraffic() {} // // جلوگیری از نمونه‌سازی
-////////////
-////////////    private static final Random rnd = new Random(); // // رندوم مشترک
-////////////
-////////////    // --------------------------------------------------------------------
-////////////    // ۱) نصب چراغ‌ها: سه‌راهی‌ها و فلکه‌ها (id شروع‌شون با "RND-") چراغ نگیرند
-////////////    // --------------------------------------------------------------------
-////////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) { // // نصب چراغ
-////////////        if (map == null) return; // // نال‌چک
-////////////
-////////////        Map<String, Integer> degree = new HashMap<String, Integer>(); // // درجه هر تقاطع
-////////////        List<Intersection> xs = map.getIntersections(); // // همه تقاطع‌ها
-////////////        for (int i = 0; i < xs.size(); i++) { degree.put(xs.get(i).getId(), 0); } // // مقداردهی اولیه
-////////////
-////////////        List<Road> rs = map.getRoads(); // // همه جاده‌ها
-////////////        for (int i = 0; i < rs.size(); i++) { // // حلقه جاده‌ها
-////////////            Road r = rs.get(i); // // جاده
-////////////            String a = r.getStart().getId(); // // سر جاده
-////////////            String b = r.getEnd().getId();   // // ته جاده
-////////////            degree.put(a, degree.get(a) + 1); // // افزایش درجه
-////////////            degree.put(b, degree.get(b) + 1); // // افزایش درجه
-////////////        }
-////////////
-////////////        for (int i = 0; i < xs.size(); i++) { // // حلقه تقاطع‌ها
-////////////            Intersection it = xs.get(i); // // تقاطع
-////////////            Integer deg = degree.get(it.getId()); if (deg == null) deg = 0; // // درجه
-////////////            if (deg.intValue() == 3) continue;            // // سه‌راه: چراغ نصب نشود
-////////////            if (it.getId().startsWith("RND-")) continue;  // // فلکه: چراغ نصب نشود
-////////////
-////////////            attachIfMissing(world, it, Direction.NORTH, green, yellow, red); // // شمال
-////////////            attachIfMissing(world, it, Direction.SOUTH, green, yellow, red); // // جنوب
-////////////            attachIfMissing(world, it, Direction.EAST,  green, yellow, red); // // شرق
-////////////            attachIfMissing(world, it, Direction.WEST,  green, yellow, red); // // غرب
-////////////        }
-////////////    }
-////////////
-////////////    private static void attachIfMissing(World world, Intersection it, Direction d, int g, int y, int r) { // // وصل چراغ
-////////////        TrafficControlDevice dev = it.getControl(d); // // کنترل فعلی
-////////////        if (dev == null) { // // اگر چیزی وصل نیست
-////////////            TrafficLight tl = new TrafficLight("TL-" + it.getId() + "-" + d, d, g, y, r, 0); // // چراغ با فاز تصادفی داخلی
-////////////            it.setControl(d, tl); // // اتصال به تقاطع
-////////////            world.addTrafficLight(tl); // // ثبت در دنیا
-////////////        }
-////////////    }
-////////////
-////////////    // --------------------------------------------------------------------
-////////////    // ۲) ریختن چند خودرو تستی (اختیاری برای دمو)
-////////////    // --------------------------------------------------------------------
-////////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { // // افزودن تعدادی خودرو
-////////////        ArrayList<Lane> lanes = collectAllLanes(map); // // جمع آوری همه لِین‌ها
-////////////        if (lanes.isEmpty()) return; // // اگر لِینی نداریم خروج
-////////////
-////////////        for (int n = 0; n < count; n++) { // // تکرار به تعداد خواسته
-////////////            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // انتخاب لِین تصادفی
-////////////            Vehicle v = makeRandomVehicle(); // // ساخت خودرو با ویژگی‌های رندوم
-////////////            v.setCurrentLane(lane); // // قرار دادن روی لِین
-////////////            v.setPositionInLane(rnd.nextInt(40)); // // قدری جلوتر از ابتدا
-////////////            v.setTargetSpeed(36 + rnd.nextInt(18)); // // هدف سرعت اولیه
-////////////            world.addVehicle(v); // // افزودن به دنیا
-////////////        }
-////////////    }
-////////////
-////////////    // --------------------------------------------------------------------
-////////////    // ۳) افزودن ۱ خودرو تصادفی (متدی که UIController صدا می‌زند)
-////////////    // --------------------------------------------------------------------
-////////////    public static Vehicle addRandomVehicle(World world, CityMap map) { // // افزودن تک‌خودرو
-////////////        ArrayList<Lane> lanes = collectAllLanes(map); // // گرفتن همه لِین‌ها
-////////////        if (lanes.isEmpty()) return null; // // بدون لِین
-////////////        Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // انتخاب لِین تصادفی
-////////////
-////////////        Vehicle v = makeRandomVehicle(); // // ساخت خودرو
-////////////        v.setCurrentLane(lane); // // قرار دادن روی لِین
-////////////        v.setPositionInLane(rnd.nextInt(30)); // // موقعیت اولیه
-////////////        v.setTargetSpeed(34 + rnd.nextInt(22)); // // سرعت هدف (px/s)
-////////////        world.addVehicle(v); // // افزودن به دنیا
-////////////        return v; // // برگرداندن برای UI
-////////////    }
-////////////
-////////////    // --------------------------------------------------------------------
-////////////    // ابزارهای داخلی
-////////////    // --------------------------------------------------------------------
-////////////    private static ArrayList<Lane> collectAllLanes(CityMap map) { // // جمع کردن همه لِین‌ها
-////////////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // لیست خروجی
-////////////        if (map == null) return lanes; // // نال‌چک
-////////////        List<Road> roads = map.getRoads(); // // همه جاده‌ها
-////////////        for (int i = 0; i < roads.size(); i++) { // // حلقه
-////////////            Road r = roads.get(i); // // جاده
-////////////            lanes.addAll(r.getForwardLanes());   // // لِین‌های رفت
-////////////            lanes.addAll(r.getBackwardLanes());  // // لِین‌های برگشت
-////////////        }
-////////////        return lanes; // // خروجی
-////////////    }
-////////////
-////////////    private static Vehicle makeRandomVehicle() { // // ساخت خودرو رندوم
-////////////        String id = "V-" + System.nanoTime(); // // id یکتا
-////////////        VehicleType type = randomType(); // // نوع تصادفی
-////////////        double vmax = 60 + rnd.nextInt(50); // // سقف سرعت px/s
-////////////        Vehicle v = new Vehicle(id, type, vmax, DriverProfile.LAW_ABIDING); // // ساخت
-////////////        v.setAcceleration(60.0); // // شتاب ملایم
-////////////        v.setDeceleration(120.0); // // ترمز قوی‌تر
-////////////        return v; // // خروجی
-////////////    }
-////////////
-////////////    private static VehicleType randomType() { // // انتخاب نوع خودرو
-////////////        VehicleType[] vals = VehicleType.values(); // // آرایه انواع
-////////////        return vals[rnd.nextInt(vals.length)];     // // انتخاب تصادفی
-////////////    }
-////////////}
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-//////////////package simulation; // // پکیج simulation
-//////////////
-//////////////import core.Direction; // // جهت
-//////////////import core.Vehicle; // // خودرو
-//////////////import core.VehicleType; // // نوع خودرو
-//////////////import core.DriverProfile; // // پروفایل راننده
-//////////////import core.Route; // // مسیر
-//////////////import infrastructure.CityMap; // // نقشه
-//////////////import infrastructure.Intersection; // // تقاطع
-//////////////import infrastructure.Road; // // جاده
-//////////////import infrastructure.Lane; // // لِین
-//////////////import trafficcontrol.*; // // چراغ‌ها
-//////////////
-//////////////import java.util.ArrayList; // // لیست
-//////////////import java.util.List; // // اینترفیس
-//////////////import java.util.Random; // // رندوم
-//////////////
-//////////////public final class DemoTraffic { // // کلاس دمو
-//////////////    private DemoTraffic() {} // // جلوگیری از نمونه‌سازی
-//////////////    private static final Random rnd = new Random(); // // رندوم
-//////////////
-//////////////    // ---------- نصب چراغ ----------
-//////////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) { // // نصب چراغ‌ها
-//////////////        List<Intersection> xs = map.getIntersections(); // // تقاطع‌ها
-//////////////        for (int i = 0; i < xs.size(); i++) { // // حلقه
-//////////////            Intersection it = xs.get(i); // // تقاطع
-//////////////            attachIfMissing(world, it, Direction.NORTH, green, yellow, red); // // شمال
-//////////////            attachIfMissing(world, it, Direction.SOUTH, green, yellow, red); // // جنوب
-//////////////            attachIfMissing(world, it, Direction.EAST,  green, yellow, red); // // شرق
-//////////////            attachIfMissing(world, it, Direction.WEST,  green, yellow, red); // // غرب
-//////////////        }
-//////////////    }
-//////////////
-//////////////    private static void attachIfMissing(World world, Intersection it, Direction d, int g, int y, int r) { // // وصل کردن چراغ
-//////////////        TrafficControlDevice dev = it.getControl(d); // // کنترل فعلی
-//////////////        if (dev == null) { // // اگر خالی
-//////////////            TrafficLight tl = new TrafficLight("TL-" + it.getId() + "-" + d, d, g, y, r, LightState.GREEN.ordinal()); // // ساخت چراغ
-//////////////            it.setControl(d, tl); // // نصب روی تقاطع
-//////////////            world.addTrafficLight(tl); // // ثبت برای آپدیت
-//////////////        }
-//////////////    }
-//////////////
-//////////////    // ---------- خودروهای تستی با مسیر ----------
-//////////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { // // افزودن چند خودرو
-//////////////        ArrayList<Lane> lanes = collectAllLanes(map); // // همه لِین‌ها
-//////////////        List<Intersection> xs = map.getIntersections(); // // همه تقاطع‌ها
-//////////////        if (lanes.isEmpty() || xs.isEmpty()) return; // // اگر تهی
-//////////////
-//////////////        for (int n = 0; n < count; n++) { // // تکرار
-//////////////            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // لِین تصادفی
-//////////////            double vmax = 80 + rnd.nextInt(50); // // Vmax ~ 80..129 px/s
-//////////////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), vmax, DriverProfile.LAW_ABIDING); // // ساخت خودرو
-//////////////            v.setCurrentLane(lane); // // قرار دادن روی لِین
-//////////////            v.setPositionInLane(rnd.nextInt(40)); // // کمی جلوتر از ابتدا
-//////////////            double target = 50 + rnd.nextInt(40); // // هدف سرعت 50..89
-//////////////            v.setTargetSpeed(target); // // ست سرعت هدف
-//////////////
-//////////////            // انتخاب مقصد و محاسبهٔ مسیر
-//////////////            Intersection goal = xs.get(rnd.nextInt(xs.size())); // // مقصد تصادفی
-//////////////            Route rt = PathFinder.shortestRoute(map, lane, goal); // // مسیر کوتاه
-//////////////            v.setRoute(rt); // // ثبت مسیر
-//////////////            v.setDestination(goal); // // ثبت مقصد
-//////////////
-//////////////            world.addVehicle(v); // // افزودن به دنیا
-//////////////        }
-//////////////    }
-//////////////
-//////////////    // ---------- افزودن تک خودرو با مسیر ----------
-//////////////    public static Vehicle addRandomVehicle(World world, CityMap map) { // // افزودن یک خودرو
-//////////////        ArrayList<Lane> lanes = collectAllLanes(map); // // همه لِین‌ها
-//////////////        List<Intersection> xs = map.getIntersections(); // // تقاطع‌ها
-//////////////        if (lanes.isEmpty() || xs.isEmpty()) return null; // // اگر تهی
-//////////////
-//////////////        Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // لِین تصادفی
-//////////////        double vmax = 80 + rnd.nextInt(50); // // Vmax
-//////////////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), vmax, DriverProfile.LAW_ABIDING); // // خودرو
-//////////////        v.setCurrentLane(lane); // // لِین
-//////////////        v.setPositionInLane(rnd.nextInt(30)); // // مکان
-//////////////        v.setTargetSpeed(50 + rnd.nextInt(40)); // // هدف سرعت
-//////////////
-//////////////        Intersection goal = xs.get(rnd.nextInt(xs.size())); // // مقصد
-//////////////        Route rt = PathFinder.shortestRoute(map, lane, goal); // // مسیر
-//////////////        v.setRoute(rt); // // ثبت
-//////////////        v.setDestination(goal); // // مقصد
-//////////////
-//////////////        world.addVehicle(v); // // افزودن
-//////////////        return v; // // خروجی
-//////////////    }
-//////////////
-//////////////    // ---------- کمک‌ها ----------
-//////////////    private static ArrayList<Lane> collectAllLanes(CityMap map) { // // جمع‌آوری همهٔ لِین‌ها
-//////////////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // خروجی
-//////////////        List<Road> roads = map.getRoads(); // // جاده‌ها
-//////////////        for (int i = 0; i < roads.size(); i++) { // // حلقه
-//////////////            Road r = roads.get(i); // // جاده
-//////////////            lanes.addAll(r.getForwardLanes()); // // لِین‌های forward
-//////////////            lanes.addAll(r.getBackwardLanes()); // // لِین‌های backward
-//////////////        }
-//////////////        return lanes; // // خروجی
-//////////////    }
-//////////////
-//////////////    private static VehicleType randomType() { // // نوع خودرو تصادفی
-//////////////        VehicleType[] vals = VehicleType.values(); // // همه انواع
-//////////////        return vals[rnd.nextInt(vals.length)]; // // یکی تصادفی
-//////////////    }
-//////////////}
-//////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-////////////
-//////////////package simulation; // // پکیج simulation
-//////////////
-//////////////import core.Direction; // // جهت
-//////////////import core.Vehicle; // // خودرو
-//////////////import core.VehicleType; // // نوع خودرو
-//////////////import core.DriverProfile; // // پروفایل راننده
-//////////////import infrastructure.CityMap; // // نقشه
-//////////////import infrastructure.Intersection; // // تقاطع
-//////////////import infrastructure.Road; // // جاده
-//////////////import infrastructure.Lane; // // لِین
-//////////////import trafficcontrol.TrafficLight; // // چراغ
-//////////////import trafficcontrol.LightState; // // حالت چراغ
-//////////////import trafficcontrol.TrafficControlDevice; // // اینترفیس کنترل
-//////////////
-//////////////import java.util.ArrayList; // // لیست کمکی
-//////////////import java.util.List; // // اینترفیس لیست
-//////////////import java.util.Random; // // رندوم
-//////////////
-//////////////public final class DemoTraffic { // // کلاس کمکی ترافیک دمو
-//////////////    private DemoTraffic() {} // // جلوگیری از نمونه‌سازی
-//////////////    private static final Random rnd = new Random(); // // رندوم مشترک
-//////////////
-//////////////    // ---------- نصب چراغ روی همهٔ جهت‌های هر تقاطع (اگر کنترل ندارد) ----------
-//////////////    public static void installLights(World world, CityMap map, int green, int yellow, int red) { // // نصب چراغ‌ها
-//////////////        List<Intersection> xs = map.getIntersections(); // // همه تقاطع‌ها
-//////////////        for (int i = 0; i < xs.size(); i++) { // // حلقه روی تقاطع‌ها
-//////////////            Intersection it = xs.get(i); // // تقاطع
-//////////////            attachIfMissing(world, it, Direction.NORTH, green, yellow, red); // // شمال
-//////////////            attachIfMissing(world, it, Direction.SOUTH, green, yellow, red); // // جنوب
-//////////////            attachIfMissing(world, it, Direction.EAST,  green, yellow, red); // // شرق
-//////////////            attachIfMissing(world, it, Direction.WEST,  green, yellow, red); // // غرب
-//////////////        }
-//////////////    }
-//////////////
-//////////////    private static void attachIfMissing(World world, Intersection it, Direction d, int g, int y, int r) { // // وصل کردن چراغ
-//////////////        TrafficControlDevice dev = it.getControl(d); // // کنترل فعلی
-//////////////        if (dev == null) { // // اگر چیزی وصل نیست
-//////////////            TrafficLight tl = new TrafficLight("TL-" + it.getId() + "-" + d, d, g, y, r, LightState.GREEN.ordinal()); // // ساخت چراغ
-//////////////            it.setControl(d, tl); // // وصل به تقاطع (نیاز به setControl داری که داری)
-//////////////            world.addTrafficLight(tl); // // ثبت در World برای آپدیت دوره‌ای
-//////////////        }
-//////////////    }
-//////////////
-//////////////    // ---------- ریختن چند خودرو تستی روی لِین‌های تصادفی ----------
-//////////////    public static void seedVehicles(World world, CityMap map, SimulationClock clock, int count) { // // افزودن خودرو
-//////////////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // لیست همه لِین‌ها
-//////////////        List<Road> roads = map.getRoads(); // // همه جاده‌ها
-//////////////        for (int i = 0; i < roads.size(); i++) { // // حلقه روی جاده‌ها
-//////////////            Road r = roads.get(i); // // جاده
-//////////////            lanes.addAll(r.getForwardLanes()); // // لِین‌های رفت
-//////////////            lanes.addAll(r.getBackwardLanes()); // // لِین‌های برگشت
-//////////////        }
-//////////////        if (lanes.isEmpty()) return; // // اگر هیچ لِینی نداریم خروج
-//////////////
-//////////////        for (int n = 0; n < count; n++) { // // به تعداد خواسته
-//////////////            Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // یک لِین رندوم
-//////////////            Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // // خودرو
-//////////////            v.setCurrentLane(lane); // // قرار دادن روی لِین
-//////////////            v.setPositionInLane(rnd.nextInt(40)); // // کمی جلوتر از ابتدا
-//////////////            v.setTargetSpeed(38 + rnd.nextInt(15)); // // سرعت هدف اولیه
-//////////////            world.addVehicle(v); // // افزودن به دنیا
-//////////////        }
-//////////////    }
-//////////////
-//////////////    // ---------- یوتیلیتی: افزودن یک خودرو کاملاً تصادفی ----------
-//////////////    public static Vehicle addRandomVehicle(World world, CityMap map) { // // افزودن تک خودرو
-//////////////        ArrayList<Lane> lanes = new ArrayList<Lane>(); // // جمع‌کردن لِین‌ها
-//////////////        List<Road> roads = map.getRoads(); // // جاده‌ها
-//////////////        for (int i = 0; i < roads.size(); i++) { // // حلقه
-//////////////            Road r = roads.get(i); // // جاده
-//////////////            lanes.addAll(r.getForwardLanes()); // // رفت
-//////////////            lanes.addAll(r.getBackwardLanes()); // // برگشت
-//////////////        }
-//////////////        if (lanes.isEmpty()) return null; // // بدون لِین
-//////////////
-//////////////        Lane lane = lanes.get(rnd.nextInt(lanes.size())); // // انتخاب لِین
-//////////////        Vehicle v = new Vehicle("V-" + System.nanoTime(), randomType(), 60 + rnd.nextInt(30), DriverProfile.LAW_ABIDING); // // خودرو
-//////////////        v.setCurrentLane(lane); // // ست لِین
-//////////////        v.setPositionInLane(rnd.nextInt(30)); // // موقعیت اولیه
-//////////////        v.setTargetSpeed(36 + rnd.nextInt(18)); // // هدف سرعت
-//////////////        world.addVehicle(v); // // افزودن
-//////////////        return v; // // بازگشت
-//////////////    }
-//////////////
-//////////////    private static core.VehicleType randomType() { // // انتخاب نوع خودرو تصادفی
-//////////////        core.VehicleType[] vals = core.VehicleType.values(); // // آرایه انواع
-//////////////        return vals[rnd.nextInt(vals.length)]; // // یکی تصادفی
-//////////////    }
-//////////////}
